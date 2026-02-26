@@ -7,9 +7,10 @@ using json = nlohmann::json;
 struct ConfigData {
     float musicVolume = 0.5f;
     int typingSpeed = 30;
-    
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ConfigData, musicVolume, typingSpeed)
+    std::string language = "ru";
 };
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ConfigData, musicVolume, typingSpeed, language)
 
 class SettingsManager {
 public:

@@ -10,4 +10,5 @@ public:
 private:
     void showAbout();
     ma_sound menuMusic; 
+    ma_sound hoverSfx;
 };

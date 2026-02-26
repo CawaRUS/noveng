@@ -3,9 +3,11 @@
 #include "engine.hpp"
 #include "setting.hpp"
 #include <conio.h>
+#include "localisation.hpp"
 
 int main() {
     SettingsManager::getInstance().load();
+    LocalizationManager::getInstance().loadLanguage(SettingsManager::getInstance().get().language);
     setupConsole();
 
     MainMenu menu;
@@ -37,25 +39,23 @@ int main() {
                 game.clearEvents();
                 if (game.loadScenario(currentFile)) {
                     game.applySettings();
-                    
-                    
-                    game.run();
+                    game.resetChapterFlag(); 
+
+                    game.run(); 
                     
                     if (game.isChapterFinished()) {
                         currentFile = game.getNextChapter();
                         game.resetChapterFlag();
                         game.currentEventIdx = 0;
-                        game.stopAudio();
                         clearScreen();
                     } else {
                         currentFile = ""; 
                     }
                 } else {
-                    std::cerr << "Ошибка загрузки: " << currentFile << std::endl;
                     break;
                 }
             }
-            std::cout << "\nКонец игры или выход в меню. Нажмите любую клавишу...";
+            std::cout << LocalizationManager::getInstance().get("game_over_prompt") << std::endl;
             _getch();
             game.stopAudio();
         } else if (result == 0) {
