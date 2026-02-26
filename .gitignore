@@ -1,0 +1,17 @@
+
+build/
+*.exe
+*.o
+*.obj
+*.pdb
+res/save/*.json
+settings.json
+.vscode/
+.vs/
+*.user
+*.userosscache
+*.sln
+*.vcxproj
+Thumbs.db
+.DS_Store
+res/scenario
