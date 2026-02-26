@@ -1,0 +1,8 @@
+{
+    "characterColors": {
+        "Евгений": "\u001b[1;32m",
+        "Кавас": "\u001b[1;35m"
+    },
+    "currentScene": "res/scenario/scenario.txt",
+    "eventIndex": 9
+}
