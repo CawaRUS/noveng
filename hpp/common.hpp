@@ -2,7 +2,6 @@
 #include <iostream>
 #include <windows.h>
 
-// ANSI Escape Codes для Windows 10+
 #define CLR_RESET   "\033[0m"
 #define CLR_NAME    "\033[1;36m" // Яркий циан
 #define CLR_TEXT    "\033[0;37m" // Белый
@@ -12,7 +11,6 @@
 inline void setupConsole() {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    // Включаем поддержку ANSI в Windows консоли
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD dwMode = 0;
     GetConsoleMode(hOut, &dwMode);

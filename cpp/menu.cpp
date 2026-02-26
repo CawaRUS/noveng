@@ -13,7 +13,6 @@ namespace fs = std::filesystem;
 void MainMenu::playIntro(ma_engine* audio) {
     clearScreen();
 
-    // Вспомогательная лямбда для печатания с задержкой
     auto typeWrite = [](const std::string& text, int delayMs = 50) {
         for (char c : text) {
             std::cout << c << std::flush;
@@ -31,7 +30,6 @@ void MainMenu::playIntro(ma_engine* audio) {
         return false;
     };
 
-    // ASCII-логотип
     const std::string logo = R"(
                                                                                     
             ,-----.                                      ,--.               
@@ -42,7 +40,6 @@ void MainMenu::playIntro(ma_engine* audio) {
                                                                     
     )";
 
-    // Инициализируем музыку
     ma_sound_init_from_file(audio, "res/music/menu.mp3", 0, NULL, NULL, &menuMusic);
     ma_sound_set_looping(&menuMusic, MA_TRUE);
     ma_sound_start(&menuMusic);
@@ -50,12 +47,10 @@ void MainMenu::playIntro(ma_engine* audio) {
     auto startTime = std::chrono::steady_clock::now();
     bool skipped = false;
 
-    // --- Фаза 1: студия ---
     std::cout << "\n\n\n";
     typeWrite("\t\t   ~ T H E   T H E C A W A   P R E S E N T S ~\n", 40);
     if (waitOrSkip(1200)) { skipped = true; goto done; }
 
-    // --- Фаза 2: логотип построчно ---
     clearScreen();
     std::cout << "\n\n";
     for (char c : logo) {
@@ -67,12 +62,10 @@ void MainMenu::playIntro(ma_engine* audio) {
     }
     if (waitOrSkip(800)) { skipped = true; goto done; }
 
-    // --- Фаза 3: слоган ---
     std::cout << "\n";
     typeWrite("\t\t      [ Press ENTER to start ]", 35);
     if (waitOrSkip(500)) { skipped = true; goto done; }
 
-    // --- Ждём до конца интро ---
     {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - startTime).count();
@@ -90,17 +83,17 @@ done:
 
 void MainMenu::showSettings() {
     auto& settings = SettingsManager::getInstance().get();
-    int selected = 0; // 0 - Громкость, 1 - Скорость
+    int selected = 0;
 
     while (true) {
         clearScreen();
-        std::cout << "\n     --- НАСТРОЙКИ ---\n\n";
+        std::cout << "\n     --- НАСТРОЙКИ ---\n\n";
         
         // Рендерим пункты
-        if (selected == 0) std::cout << " > "; else std::cout << "   ";
+        if (selected == 0) std::cout << " > "; else std::cout << "   ";
         std::cout << "Громкость музыки: " << (int)(settings.musicVolume * 100) << "%\n";
 
-        if (selected == 1) std::cout << " > "; else std::cout << "   ";
+        if (selected == 1) std::cout << " > "; else std::cout << "   ";
         std::cout << "Скорость текста: " << settings.typingSpeed << " мс\n";
 
         std::cout << "\n [ Esc - Сохранить и выйти | ← → - Изменить ]";
@@ -113,7 +106,6 @@ void MainMenu::showSettings() {
             if (key == 72) selected = 0; // Вверх
             if (key == 80) selected = 1; // Вниз
             
-            // Изменение значений
             if (selected == 0) {
                 if (key == 75) settings.musicVolume = std::max(0.0f, settings.musicVolume - 0.05f); // Влево
                 if (key == 77) settings.musicVolume = std::min(1.0f, settings.musicVolume + 0.05f); // Вправо
@@ -124,7 +116,7 @@ void MainMenu::showSettings() {
             }
         }
     }
-    SettingsManager::getInstance().save(); // Сохраняем в JSON
+    SettingsManager::getInstance().save();
 }
 
 int MainMenu::show() {
@@ -137,16 +129,15 @@ int MainMenu::show() {
     bool hasSave = fs::exists("res/save/save1.json");
 
     std::vector<std::string> items;
-    if (hasSave) items.push_back("  Продолжить   "); // Индекс 0
-    items.push_back("  Новая игра   ");                 // Индекс 0 или 1
-    items.push_back("  Настройки    ");
-    items.push_back("  Об игре      ");
-    items.push_back("  Выход        ");
+    if (hasSave) items.push_back("  Продолжить   ");
+    items.push_back("  Новая игра   ");                 
+    items.push_back("  Настройки    ");
+    items.push_back("  Об игре      ");
+    items.push_back("  Выход        ");
 
     int selected = 0;
     const int itemCount = static_cast<int>(items.size());
 
-    // Скрываем курсор (код остается прежним)
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_CURSOR_INFO cursorInfo;
     GetConsoleCursorInfo(hConsole, &cursorInfo);
@@ -155,22 +146,21 @@ int MainMenu::show() {
 
     auto render = [&]() {
         clearScreen();
-        // ... (Твой красивый ASCII-бордер остается без изменений) ...
-        std::cout << "\n\n  ╔══════════════════════════╗\n";
-        std::cout << "  ║       NOVENG  v0.1       ║\n";
-        std::cout << "  ╠══════════════════════════╣\n";
-        std::cout << "  ║                          ║\n";
+        std::cout << "\n\n  ╔══════════════════════════╗\n";
+        std::cout << "  ║        NOVENG  v0.1       ║\n";
+        std::cout << "  ╠══════════════════════════╣\n";
+        std::cout << "  ║                          ║\n";
 
         for (int i = 0; i < itemCount; i++) {
             if (i == selected)
-                std::cout << "  ║  > " << items[i] << "       ║\n";
+                std::cout << "  ║  > " << items[i] << "       ║\n";
             else
-                std::cout << "  ║    " << items[i] << "       ║\n";
+                std::cout << "  ║    " << items[i] << "       ║\n";
         }
 
-        std::cout << "  ║                          ║\n";
-        std::cout << "  ╚══════════════════════════╝\n";
-        std::cout << "\n  [ ↑ ↓ — навигация | Enter — выбор ]\n";
+        std::cout << "  ║                          ║\n";
+        std::cout << "  ╚══════════════════════════╝\n";
+        std::cout << "\n  [ ↑ ↓ — навигация | Enter — выбор ]\n";
     };
 
     while (true) {
@@ -188,20 +178,18 @@ int MainMenu::show() {
             cursorInfo.bVisible = true;
             SetConsoleCursorInfo(hConsole, &cursorInfo);
 
-            // Логика выбора с учетом наличия сейва
             int action = selected;
-            if (!hasSave) action += 1; // Смещаем индексы, если "Продолжить" нет
+            if (!hasSave) action += 1;
 
             switch (action) {
-                case 0: // Продолжить
+                case 0:
                     ma_sound_stop(&menuMusic);
-                    return 2; // Код 2 будет значить "Загрузить сейв"
-                case 1: // Новая игра
+                    return 2;
+                case 1:
                     ma_sound_stop(&menuMusic);
                     return 1; 
-                case 2: // Настройки
+                case 2:
                     showSettings();
-                    // После настроек проверяем сейв снова (вдруг удалили?)
                     hasSave = fs::exists("res/save/save1.json"); 
                     break;
                 case 3: 

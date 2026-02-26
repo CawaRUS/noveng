@@ -19,7 +19,7 @@ void NovelEngine::saveGame(int slot) {
     if (!fs::exists("res/save")) fs::create_directories("res/save");
 
     GameState state;
-    state.currentScene = currentChapterFile; // Нужно убедиться, что путь хранится в классе
+    state.currentScene = currentChapterFile;
     state.characterColors = this->characterColors;
     state.eventIndex = currentEventIdx;
 

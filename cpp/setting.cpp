@@ -10,7 +10,7 @@ void SettingsManager::load() {
     }
 
     if (!fs::exists(filePath)) {
-        save(); // Создаем дефолтный файл, если нет
+        save();
         return;
     }
 
@@ -20,7 +20,6 @@ void SettingsManager::load() {
         file >> j;
         data = j.get<ConfigData>();
     } catch (...) {
-        // Если JSON битый, просто оставляем дефолт
         save();
     }
 }

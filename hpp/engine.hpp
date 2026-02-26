@@ -35,11 +35,9 @@ public:
     void typeText(const std::string& text, int speedMs);
     void clearEvents() { events.clear(); }
     
-    // Система сохранений
     void saveGame(int slot = 1);
     bool loadGame(int slot = 1);
 
-    // Удалил дубликат currentEventIdx, оставил один
     size_t currentEventIdx = 0; 
     std::string currentChapterFile = "res/scenario/scenario.txt";
     

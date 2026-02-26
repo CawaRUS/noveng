@@ -15,15 +15,14 @@ int main() {
     while (true) {
         int result = menu.show(); 
         
-        if (result == 1 || result == 2) { // 1 - Новая игра, 2 - Продолжить
+        if (result == 1 || result == 2) {
             clearScreen();
             
             std::string currentFile;
 
             if (result == 2) {
-                // Пытаемся загрузить данные из JSON
                 if (game.loadGame(1)) {
-                    currentFile = game.getNextChapter(); // Путь из сейва лег в nextChapterFile
+                    currentFile = game.getNextChapter();
                     game.resetChapterFlag(); 
                 } else {
                     currentFile = "res/scenario/scenario.txt";
@@ -31,7 +30,7 @@ int main() {
             } else {
                 // Новая игра
                 currentFile = "res/scenario/scenario.txt";
-                game.currentEventIdx = 0; // Начинаем с начала
+                game.currentEventIdx = 0;
             }
             
             while (!currentFile.empty()) {
@@ -45,7 +44,7 @@ int main() {
                     if (game.isChapterFinished()) {
                         currentFile = game.getNextChapter();
                         game.resetChapterFlag();
-                        game.currentEventIdx = 0; // Новая глава всегда с 0
+                        game.currentEventIdx = 0;
                         game.stopAudio();
                         clearScreen();
                     } else {

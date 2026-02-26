@@ -8,7 +8,6 @@ struct ConfigData {
     float musicVolume = 0.5f;
     int typingSpeed = 30;
     
-    // Позволяет nlohmann работать со структурой как с объектом
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(ConfigData, musicVolume, typingSpeed)
 };
 
