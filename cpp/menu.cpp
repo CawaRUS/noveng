@@ -147,7 +147,7 @@ int MainMenu::show() {
     auto render = [&]() {
         clearScreen();
         std::cout << "\n\n  ╔══════════════════════════╗\n";
-        std::cout << "  ║        NOVENG  v0.1       ║\n";
+        std::cout << "  ║        NOVENG  v0.1      ║\n";
         std::cout << "  ╠══════════════════════════╣\n";
         std::cout << "  ║                          ║\n";
 
