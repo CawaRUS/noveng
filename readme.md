@@ -53,6 +53,7 @@
 ## Credits / Благодарности
 Движок создавали:
 [TheCawa](https://cawas.duckdns.org/me.html) ( [CawaRUS](https://github.com/CawaRUS) )
+
 В проекте использованы музыкальные композиции:
 * **Автор:** [Егорbez](https://open.spotify.com/artist/1IqUqQeXkri4oktoPWRrhJ?si=Uiaq2KEyRRqw0IvKqjuWPw) (Саундтреки из игры "*Кризис: Третий путь*")
 * Все права на музыку принадлежат автору.
