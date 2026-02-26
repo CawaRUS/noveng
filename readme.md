@@ -25,7 +25,7 @@
 
 ### Доступные команды:
 
-**Читать в *documentation.md***
+**Читать в *[documentation.md](documentation.md)***
 
 ---
 
