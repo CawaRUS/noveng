@@ -1,0 +1,9 @@
+{clear}
+{color: Система | 36}
+{play: menu.mp3 | loop}
+
+[Система]
+Хорошая концовка достигнута!
+Тест chance прошел успешно - выпал 50% шанс
+
+{next_chapter: test_final.txt}

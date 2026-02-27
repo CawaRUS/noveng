@@ -4,6 +4,9 @@
 #include "setting.hpp"
 #include <conio.h>
 #include "localisation.hpp"
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 int main() {
     SettingsManager::getInstance().load();
@@ -19,19 +22,16 @@ int main() {
         
         if (result == 1 || result == 2) {
             clearScreen();
-            
             std::string currentFile;
 
             if (result == 2) {
                 if (game.loadGame(1)) {
-                    currentFile = game.getNextChapter();
-                    game.resetChapterFlag(); 
+                    currentFile = game.currentChapterFile; 
                 } else {
-                    currentFile = "res/scenario/scenario.txt";
+                    currentFile = (fs::path(DIR_RES) / DIR_SCENARIO / "scenario.txt").string();
                 }
             } else {
-                // Новая игра
-                currentFile = "res/scenario/scenario.txt";
+                currentFile = (fs::path(DIR_RES) / DIR_SCENARIO / "scenario.txt").string();
                 game.currentEventIdx = 0;
             }
             
@@ -39,8 +39,6 @@ int main() {
                 game.clearEvents();
                 if (game.loadScenario(currentFile)) {
                     game.applySettings();
-                    game.resetChapterFlag(); 
-
                     game.run(); 
                     
                     if (game.isChapterFinished()) {
@@ -49,13 +47,15 @@ int main() {
                         game.currentEventIdx = 0;
                         clearScreen();
                     } else {
-                        currentFile = ""; 
+                        currentFile = "";
                     }
                 } else {
+                    std::cerr << "Error: Cannot load " << currentFile << std::endl;
                     break;
                 }
             }
-            std::cout << LocalizationManager::getInstance().get("game_over_prompt") << std::endl;
+            
+            std::cout << "\n" << LocalizationManager::getInstance().get("game_over_prompt") << std::endl;
             _getch();
             game.stopAudio();
         } else if (result == 0) {

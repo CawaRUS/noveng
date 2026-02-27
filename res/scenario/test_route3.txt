@@ -1,0 +1,14 @@
+{clear}
+{color: Исследователь | 32}
+{sfx: hover.mp3}
+
+[Исследователь]
+Интересное оборудование...
+
+{color: Система | 36}
+[Система]
+Обнаружено вмешательство в систему
+
+{set: trust_level | -5}
+
+{if: trust_level | 0 | test_bad.txt | test_check.txt}

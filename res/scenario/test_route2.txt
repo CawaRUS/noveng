@@ -1,0 +1,10 @@
+{clear}
+{color: Исследователь | 32}
+
+[Исследователь]
+Лучше останусь здесь...
+
+{set: trust_level | 2}
+{set: test_flag | 1}
+
+{if: test_flag | 1 | test_flag_true.txt | test_flag_false.txt}

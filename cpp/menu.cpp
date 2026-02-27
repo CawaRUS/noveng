@@ -9,10 +9,33 @@
 #include <thread>
 #include <filesystem>
 #include "localisation.hpp"
+#include <regex>
+
 namespace fs = std::filesystem;
 
+
+std::string stripANSI(const std::string& str) {
+
+    return std::regex_replace(str, std::regex("\x1B\\[[0-9;]*[mK]"), "");
+}
+
+int getVisibleLength(const std::string& str) {
+    std::string cleanStr = stripANSI(str);
+    int length = 0;
+    for (size_t i = 0; i < cleanStr.length(); i++) {
+        if ((static_cast<unsigned char>(cleanStr[i]) & 0xC0) != 0x80) {
+            length++;
+        }
+    }
+    return length;
+}
+
 void MainMenu::playIntro(ma_engine* audio) {
-    ma_sound_init_from_file(audio, "res/sfx/hover.mp3", 0, NULL, NULL, &hoverSfx);
+    fs::path hoverPath = fs::path(DIR_RES) / DIR_SFX / "hover.mp3";
+    fs::path musicPath = fs::path(DIR_RES) / DIR_MUSIC / "menu.mp3";
+
+    ma_sound_init_from_file(audio, hoverPath.string().c_str(), 0, NULL, NULL, &hoverSfx);
+    ma_sound_init_from_file(audio, musicPath.string().c_str(), 0, NULL, NULL, &menuMusic);
     
     clearScreen();
 
@@ -34,16 +57,13 @@ void MainMenu::playIntro(ma_engine* audio) {
     };
 
     const std::string logo = R"(
-                                                                                    
-            ,-----.                                      ,--.               
+            ,-----.                                     ,--.               
             '  .--./ ,--,--.,--.   ,--. ,--,--. ,---.     |  |,--,--,  ,---. 
-            |  |    ' ,-.  ||  |.'.|  |' ,-.  |(  .-'     |  ||      \| .--' 
+            |  |    ' ,-.  ||  |.'.|  |' ,-.  |(  .-'     |  ||  |  |  \| .--' 
             '  '--'\\ '-'  ||  .'.  |\ '-'  |.-'  `)     |  ||  ||  |\ `--. 
             `-----' `--`--''--'   '--' `--`--'`----'      `--'`--''--' `---' 
-                                                                             
     )";
 
-    ma_sound_init_from_file(audio, "res/music/menu.mp3", 0, NULL, NULL, &menuMusic);
     ma_sound_set_looping(&menuMusic, MA_TRUE);
     ma_sound_start(&menuMusic);
 
@@ -84,16 +104,6 @@ done:
     }
 }
 
-int getUTF8Length(const std::string& str) {
-    int length = 0;
-    for (size_t i = 0; i < str.length(); i++) {
-        if ((static_cast<unsigned char>(str[i]) & 0xC0) != 0x80) {
-            length++;
-        }
-    }
-    return length;
-}
-
 void MainMenu::showSettings() {
     auto& settings = SettingsManager::getInstance().get();
     int selected = 0;
@@ -112,7 +122,7 @@ void MainMenu::showSettings() {
         if (selected == 2) std::cout << " > "; else std::cout << "   ";
         std::cout << LocalizationManager::getInstance().get("setting_lang") << ": " << settings.language << "\n";
 
-        std::cout << "\n [ Esc - " << LocalizationManager::getInstance().get("btn_save_exit") << " | ← → - " << LocalizationManager::getInstance().get("btn_change") << " ]";
+        std::cout << "\n [ Esc - " << LocalizationManager::getInstance().get("btn_save_exit") << " | \x1B[2D\x1B[2C - " << LocalizationManager::getInstance().get("btn_change") << " ]";
 
         int key = _getch();
         if (key == 27) break; // ESC
@@ -124,7 +134,7 @@ void MainMenu::showSettings() {
             if (key == 80) selected = (selected + 1) % maxOptions; // Вниз
 
             if (selected != prevSelected) {
-                ma_sound_seek_to_pcm_frame(&hoverSfx, 0); // Сброс в начало
+                ma_sound_seek_to_pcm_frame(&hoverSfx, 0);
                 ma_sound_start(&hoverSfx);
             }
             
@@ -153,7 +163,6 @@ int MainMenu::show() {
     }
 
     int selected = 0;
-
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_CURSOR_INFO cursorInfo;
     GetConsoleCursorInfo(hConsole, &cursorInfo);
@@ -161,7 +170,9 @@ int MainMenu::show() {
     SetConsoleCursorInfo(hConsole, &cursorInfo);
 
     while (true) {
-        bool hasSave = fs::exists("res/save/save1.json");
+        fs::path savePath = fs::path(DIR_RES) / DIR_SAVE / "save1.json";
+        bool hasSave = fs::exists(savePath);
+        
         auto& lm = LocalizationManager::getInstance();
 
         std::vector<std::string> items;
@@ -172,31 +183,51 @@ int MainMenu::show() {
         items.push_back(lm.get("menu_exit"));
 
         const int itemCount = static_cast<int>(items.size());
-        const int menuWidth = 34;
+        const int innerWidth = 36;
 
         clearScreen();
-        std::cout << "\n\n  ╔════════════════════════════════════╗\n";
-        std::cout << "  ║           NOVENG  v0.2             ║\n";
-        std::cout << "  ╠════════════════════════════════════╣\n";
-        std::cout << "  ║                                    ║\n";
+        
+        std::cout << "\n\n     \x1B[1;36m╔════════════════════════════════════╗\x1B[0m\n";
+        
+        std::string titleText = std::string(APP_NAME) + "  v" + std::string(APP_VERSION);
+        int titleLen = getVisibleLength(titleText);
+        int padLeft = (innerWidth - titleLen) / 2;
+        int padRight = innerWidth - titleLen - padLeft;
+        
+        std::cout << "     \x1B[1;36m║\x1B[0m" << std::string(padLeft, ' ') << titleText << std::string(padRight, ' ') << "\x1B[1;36m║\x1B[0m\n";
+        
+        // 3. Разделитель
+        std::cout << "     \x1B[1;36m╠════════════════════════════════════╣\x1B[0m\n";
+        std::cout << "     \x1B[1;36m║\x1B[0m" << std::string(innerWidth, ' ') << "\x1B[1;36m║\x1B[0m\n";
 
+        // 4. Пункты меню
         for (int i = 0; i < itemCount; i++) {
-            std::string prefix = (i == selected) ? "  > " : "    ";
+            std::string prefix = (i == selected) ? " > " : "   ";
             std::string text = items[i];
-            int visibleLen = getUTF8Length(prefix + text);
-            int spacesToAdd = menuWidth - visibleLen;
+            std::string fullLine = prefix + text;
+            
+            int visibleLen = getVisibleLength(fullLine);
+            int spacesToAdd = innerWidth - visibleLen - 2;
             if (spacesToAdd < 0) spacesToAdd = 0;
-            std::cout << "  ║ " << prefix << text << std::string(spacesToAdd, ' ') << " ║\n";
+
+            std::cout << "     \x1B[1;36m║\x1B[0m  ";
+            if (i == selected) {
+                std::cout << "\x1B[1;33m" << fullLine << "\x1B[0m";
+            } else {
+                std::cout << fullLine;
+            }
+            std::cout << std::string(spacesToAdd, ' ') << "\x1B[1;36m║\x1B[0m\n";
         }
 
-        std::cout << "  ║                                    ║\n";
-        std::cout << "  ╚════════════════════════════════════╝\n";
-        std::cout << "\n  [ " << lm.get("menu_hint") << " ]\n";
+        // 5. Нижняя граница
+        std::cout << "     \x1B[1;36m║\x1B[0m" << std::string(innerWidth, ' ') << "\x1B[1;36m║\x1B[0m\n";
+        std::cout << "     \x1B[1;36m╚════════════════════════════════════╝\x1B[0m\n";
+        std::cout << "\n     [ " << lm.get("menu_hint") << " ]\n";
         
         int key = _getch();
 
         if (key == 0xE0 || key == 0) {
-            int prevSelected = selected; // ТУТ ОБЪЯВЛЯЕМ
+            int prevSelected = selected;
             key = _getch();
             if (key == 72) selected = (selected - 1 + itemCount) % itemCount; // ↑
             if (key == 80) selected = (selected + 1) % itemCount;             // ↓
@@ -208,9 +239,10 @@ int MainMenu::show() {
             continue;
         }
 
-        if (key == 13) { // Enter
+        if (key == 13) {
             cursorInfo.bVisible = true;
             SetConsoleCursorInfo(hConsole, &cursorInfo);
+            
             int action = selected;
             if (!hasSave) action += 1; 
 
@@ -232,6 +264,7 @@ int MainMenu::show() {
 
 void MainMenu::showAbout() {
     clearScreen();
+    std::cout << "\x1B[1;32m" << "--- INFO ---" << "\x1B[0m\n\n";
     std::cout << LocalizationManager::getInstance().get("about_text") << std::endl;
     std::cout << "\n" << LocalizationManager::getInstance().get("btn_back") << "...";
     _getch();

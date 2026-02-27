@@ -1,0 +1,15 @@
+{clear}
+{color: Исследователь | 32}
+{color: Голос | 33}
+
+[Исследователь]
+Кто здесь?
+
+[Голос]
+Подойди ближе...
+
+{set: trust_level | 5}
+[Система]
+trust_level установлен на 5
+
+{chance:50|test_happy.txt|test_scary.txt}

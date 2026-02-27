@@ -9,6 +9,9 @@
 #include <sstream>
 #include "setting.hpp"
 #include "localisation.hpp"
+#include <memory>
+#include <algorithm>
+#include <ctime>
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
@@ -16,17 +19,42 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
+
+
+int safeStoi(const std::string& str, int defaultVal = 0) {
+    try {
+        return std::stoi(str);
+    } catch (...) {
+        return defaultVal;
+    }
+}
+
+NovelEngine::NovelEngine() {
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
+
+    if (ma_engine_init(NULL, &audio) != MA_SUCCESS) {
+        std::cerr << LocalizationManager::getInstance().get("audio_error") << std::endl;
+    }
+}
+
+NovelEngine::~NovelEngine() {
+    stopAudio();
+    ma_engine_uninit(&audio);
+}
+
 void NovelEngine::saveGame(int slot) {
-    if (!fs::exists("res/save")) fs::create_directories("res/save");
+    fs::path saveDir = fs::path(DIR_RES) / DIR_SAVE;
+    if (!fs::exists(saveDir)) fs::create_directories(saveDir);
 
     GameState state;
     state.currentScene = currentChapterFile;
     state.currentMusic = this->currentMusicFile;
     state.characterColors = this->characterColors;
     state.eventIndex = currentEventIdx;
+    state.variables = this->variables;
 
-    std::string path = "res/save/save" + std::to_string(slot) + ".json";
-    std::ofstream file(path);
+    fs::path savePath = saveDir / ("save" + std::to_string(slot) + ".json");
+    std::ofstream file(savePath);
     if (file.is_open()) {
         json j = state;
         file << j.dump(4);
@@ -35,27 +63,26 @@ void NovelEngine::saveGame(int slot) {
 }
 
 bool NovelEngine::loadGame(int slot) {
-    std::string path = "res/save/save" + std::to_string(slot) + ".json";
-    if (!fs::exists(path)) return false;
+    fs::path savePath = fs::path(DIR_RES) / DIR_SAVE / ("save" + std::to_string(slot) + ".json");
+    if (!fs::exists(savePath)) return false;
 
-    std::ifstream file(path);
-    json j;
-    file >> j;
-    GameState state = j.get<GameState>();
+    try {
+        std::ifstream file(savePath);
+        json j;
+        file >> j;
+        GameState state = j.get<GameState>();
 
-    this->nextChapterFile = state.currentScene;
-    this->currentEventIdx = state.eventIndex;
-    this->characterColors = state.characterColors;
-    this->currentMusicFile = state.currentMusic;
-    stopAudio();
-    this->chapterFinished = true;
-    
-    return true;
-}
-
-NovelEngine::NovelEngine() {
-    if (ma_engine_init(NULL, &audio) != MA_SUCCESS) {
-        std::cerr << LocalizationManager::getInstance().get("audio_error") << std::endl;
+        this->nextChapterFile = state.currentScene;
+        this->currentEventIdx = state.eventIndex;
+        this->characterColors = state.characterColors;
+        this->currentMusicFile = state.currentMusic;
+        this->variables = state.variables;
+        
+        stopAudio();
+        this->chapterFinished = true; 
+        return true;
+    } catch (...) {
+        return false;
     }
 }
 
@@ -64,18 +91,26 @@ void NovelEngine::applySettings() {
     ma_engine_set_volume(&audio, cfg.musicVolume);
 }
 
-NovelEngine::~NovelEngine() {
-    stopAudio();
-    ma_engine_uninit(&audio);
-}
-
 void NovelEngine::stopAudio() {
-    for (auto s : activeSounds) {
-        ma_sound_stop(s);
-        ma_sound_uninit(s);
-        delete s;
+    for (auto& s : activeSounds) {
+        ma_sound_stop(s.get());
+        ma_sound_uninit(s.get());
     }
     activeSounds.clear();
+}
+
+void NovelEngine::cleanupSounds() {
+    activeSounds.erase(
+        std::remove_if(activeSounds.begin(), activeSounds.end(),
+            [](const std::unique_ptr<ma_sound>& s) {
+                if (!ma_sound_is_playing(s.get())) {
+                    ma_sound_uninit(s.get());
+                    return true;
+                }
+                return false;
+            }),
+        activeSounds.end()
+    );
 }
 
 std::vector<std::string> split(const std::string& s, char delimiter) {
@@ -93,16 +128,12 @@ std::vector<std::string> split(const std::string& s, char delimiter) {
 }
 
 void NovelEngine::playSFX(const std::string& filename) {
-    std::string path = "res/sfx/" + filename;
-
-    ma_sound* pSfx = new ma_sound();
-    ma_result res = ma_sound_init_from_file(&audio, path.c_str(), 0, NULL, NULL, pSfx);
+    fs::path path = fs::path(DIR_RES) / DIR_SFX / filename;
+    auto pSfx = std::make_unique<ma_sound>();
     
-    if (res == MA_SUCCESS) {
-        ma_sound_start(pSfx);
-        activeSounds.push_back(pSfx); 
-    } else {
-        delete pSfx;
+    if (ma_sound_init_from_file(&audio, path.string().c_str(), 0, NULL, NULL, pSfx.get()) == MA_SUCCESS) {
+        ma_sound_start(pSfx.get());
+        activeSounds.push_back(std::move(pSfx));
     }
 }
 
@@ -110,13 +141,10 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
     int finalSpeed = SettingsManager::getInstance().get().typingSpeed;
     for (size_t i = 0; i < text.length(); ++i) {
         std::cout << text[i] << std::flush;
-
         if (_kbhit()) {
-            if (_getch() == 13) { // Enter
-                if (i + 1 < text.length()) {
-                    std::cout << text.substr(i + 1);
-                }
-                break; 
+            if (_getch() == 13) {
+                if (i + 1 < text.length()) std::cout << text.substr(i + 1);
+                break;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(finalSpeed));
@@ -127,8 +155,11 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
 bool NovelEngine::loadScenario(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) return false;
+    
+    events.clear();
     currentChapterFile = filename;
     std::string line, currentName = LocalizationManager::getInstance().get("system_name");
+    
     while (std::getline(file, line)) {
         if (line.empty()) continue;
         if (line.front() == '[' && line.back() == ']') {
@@ -149,22 +180,29 @@ void NovelEngine::run() {
 
     for (size_t i = 0; i < currentEventIdx; ++i) {
         if (events[i].type == EventType::COMMAND) {
-            if (events[i].content.find("play:") == std::string::npos && 
-                events[i].content.find("choice:") == std::string::npos) {
-                executeCommand(events[i].content);
+            const std::string& cmd = events[i].content;
+            if (cmd.find("play:") == std::string::npos && 
+                cmd.find("sfx:") == std::string::npos &&
+                cmd.find("choice:") == std::string::npos &&
+                cmd.find("next_chapter") == std::string::npos &&
+                cmd.find("chance") == std::string::npos &&
+                cmd.find("if") == std::string::npos) {
+                executeCommand(cmd);
             }
         }
     }
+    chapterFinished = false; 
+
     for (; currentEventIdx < events.size(); ++currentEventIdx) {
+        cleanupSounds();
         const auto& ev = events[currentEventIdx];
+
         if (ev.type == EventType::COMMAND) {
             executeCommand(ev.content);
             if (chapterFinished) return;
         } else {
             std::string currentColor = CLR_NAME;
-            if (characterColors.count(ev.name)) {
-                currentColor = characterColors[ev.name];
-            }
+            if (characterColors.count(ev.name)) currentColor = characterColors[ev.name];
 
             std::cout << "\n" << currentColor << ">>> " << ev.name << " <<<" << CLR_RESET << std::endl;
             std::cout << CLR_TEXT;
@@ -172,14 +210,14 @@ void NovelEngine::run() {
             std::cout << CLR_RESET;
 
             while (true) {
+                cleanupSounds();
                 if (_kbhit()) {
                     int ch = _getch();
-                    if (ch == 's' || ch == 'S' || ch == 123) { 
+                    if (ch == 's' || ch == 'S') { 
                         saveGame(1);
-                        std::cout << LocalizationManager::getInstance().get("system_save_message") << std::flush;
                         continue; 
                     }
-                    if (ch == 13) break; // Enter
+                    if (ch == 13) break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
@@ -194,82 +232,67 @@ void NovelEngine::executeCommand(const std::string& cmd) {
     size_t colonPos = cmd.find(':');
     if (colonPos != std::string::npos) {
         action = cmd.substr(0, colonPos);
-        std::string argsStr = cmd.substr(colonPos + 1);
-        args = split(argsStr, '|');
+        args = split(cmd.substr(colonPos + 1), '|');
     } else {
         action = cmd;
     }
 
     if (action == "play" && !args.empty()) {
         if (currentMusicFile == args[0] && !activeSounds.empty()) return;
-        
         stopAudio(); 
         currentMusicFile = args[0];
-        std::string path = "res/music/" + args[0];
-        ma_sound* pSound = new ma_sound();
-        ma_result res = ma_sound_init_from_file(&audio, path.c_str(), 0, NULL, NULL, pSound);
-        if (res == MA_SUCCESS) {
-            activeSounds.push_back(pSound);
+        fs::path path = fs::path(DIR_RES) / DIR_MUSIC / args[0];
+        
+        auto pSound = std::make_unique<ma_sound>();
+        if (ma_sound_init_from_file(&audio, path.string().c_str(), 0, NULL, NULL, pSound.get()) == MA_SUCCESS) {
             bool looping = false;
             for (const auto& arg : args) if (arg == "loop") looping = true;
-            if (looping) ma_sound_set_looping(pSound, MA_TRUE);
-            
-            ma_sound_start(pSound);
-        } else {
-            delete pSound;
+            ma_sound_set_looping(pSound.get(), looping ? MA_TRUE : MA_FALSE);
+            ma_sound_start(pSound.get());
+            activeSounds.push_back(std::move(pSound));
         }
     } 
     else if (action == "sfx" && !args.empty()) {
         playSFX(args[0]);
     }
-    else if (action == "stop_music") {
-        stopAudio();
-        currentMusicFile = "";
-    }
     else if (action == "color" && args.size() >= 2) {
         characterColors[args[0]] = "\033[1;" + args[1] + "m";
     }
-    else if (action == "clear") { clearScreen(); } 
-    else if (action == "next_chapter") {
+    else if (action == "clear") { system("cls"); } 
+    else if (action == "next_chapter" && !args.empty()) {
         chapterFinished = true;
-        nextChapterFile = "res/scenario/" + args[0];
+        nextChapterFile = (fs::path(DIR_RES) / DIR_SCENARIO / args[0]).string();
     }
-
     else if (action == "set" && args.size() >= 2) {
-        variables[args[0]] = std::stoi(args[1]);
+        variables[args[0]] = safeStoi(args[1]);
     }
     else if (action == "chance" && args.size() >= 3) {
-        int probability = std::stoi(args[0]);
-        int roll = rand() % 100;
+        int prob = safeStoi(args[0]);
         chapterFinished = true;
-        nextChapterFile = "res/scenario/" + (roll < probability ? args[1] : args[2]);
+        std::string nextFile = (std::rand() % 100 < prob) ? args[1] : args[2];
+        nextChapterFile = (fs::path(DIR_RES) / DIR_SCENARIO / nextFile).string();
     }
     else if (action == "if" && args.size() >= 4) {
         chapterFinished = true;
-        nextChapterFile = "res/scenario/" + (variables[args[0]] >= std::stoi(args[1]) ? args[2] : args[3]);
+        std::string nextFile = (variables[args[0]] >= safeStoi(args[1])) ? args[2] : args[3];
+        nextChapterFile = (fs::path(DIR_RES) / DIR_SCENARIO / nextFile).string();
     }
-
     else if (action == "choice") {
         std::cout << "\n" << CLR_NAME << LocalizationManager::getInstance().get("choice_header") << CLR_RESET << std::endl;
-        for (size_t i = 0; i < args.size(); i += 2) {
-            std::cout << "  " << (i / 2 + 1) << ". " << args[i] << std::endl;
+        int numOptions = (int)(args.size() / 2);
+        for (int i = 0; i < numOptions; ++i) {
+            std::cout << "  " << (i + 1) << ". " << args[i * 2] << std::endl;
         }
-        std::cout << CLR_NAME << LocalizationManager::getInstance().get("choice_footer") << CLR_RESET << std::endl;
 
         int selected = 0;
-        int numOptions = (int)(args.size() / 2);
-
         while (selected < 1 || selected > numOptions) {
             if (_kbhit()) {
                 int ch = _getch();
-                if (ch >= '1' && ch <= ('0' + numOptions)) {
-                    selected = ch - '0';
-                }
+                if (ch >= '1' && ch <= ('0' + numOptions)) selected = ch - '0';
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-
         chapterFinished = true;
-        nextChapterFile = "res/scenario/" + args[(selected - 1) * 2 + 1];
+        nextChapterFile = (fs::path(DIR_RES) / DIR_SCENARIO / args[(selected - 1) * 2 + 1]).string();
     }
 }
