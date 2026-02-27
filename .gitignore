@@ -14,4 +14,4 @@ settings.json
 *.vcxproj
 Thumbs.db
 .DS_Store
-res/scenario
+res/scenario/scenario.txt

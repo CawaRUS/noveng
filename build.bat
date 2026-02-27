@@ -30,7 +30,7 @@ for %%f in (%SRC_DIR%\*.cpp) do (
 
 echo [3/4] Linking...
 :: Линкуем всё, что собрали в цикле
-g++ !OBJECTS! -o game.exe %LIBS%
+g++ !OBJECTS! -o game.exe %LIBS% -static -static-libgcc -static-libstdc++
 
 if %errorlevel% equ 0 (
     echo [4/4] Success! Running game...
