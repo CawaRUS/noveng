@@ -23,19 +23,20 @@
 
 **Работа с цветом и звуком:**
 ```
-color:Сталкер|31
-play:ambient_dark.mp3|loop
-Сталкер: Ты не должен был сюда приходить...
-sfx:scary_whisper.wav
+{color:Сталкер|31}
+{play:ambient_dark.mp3|loop}
+[Сталкер]
+Ты не должен был сюда приходить...
+{sfx:scary_whisper.wav}
 ```
 
 **Логика и переходы:**
 ```
-set:trust_level|5
-choice:Довериться ему|trust_route.txt|Уйти|exit_route.txt
+{set:trust_level|5}
+{choice:Довериться ему|trust_route.txt|Уйти|exit_route.txt}
 ```
 
 **Проверка условий:**
 ```
-if:trust_level|10|good_ending.txt|neutral_ending.txt
+{if:trust_level|10|good_ending.txt|neutral_ending.txt}
 ```
