@@ -57,6 +57,14 @@ int main() {
                     game.clearEvents();
                     logger.debug("Attempting to load scenario: " + currentFile);
 
+                    if (!fs::exists(currentFile)) {
+                        logger.error("Scenario file not found: " + currentFile);
+                        std::cout << "\n[ERROR] " << LocalizationManager::getInstance().get("game_over_prompt") << std::endl;
+                        std::cout << "File: " << currentFile << std::endl;
+                        _getch();
+                        break;
+                    }
+
                     if (game.loadScenario(currentFile)) {
                         game.applySettings();
                         logger.info("Running scenario: " + currentFile);

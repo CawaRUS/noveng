@@ -16,6 +16,7 @@ namespace fs = std::filesystem;
 
 static bool isMusicReady = false;
 static bool isHoverReady = false;
+static bool decodersInitialized = false;
 
 std::string stripANSI(const std::string& str) {
     return std::regex_replace(str, std::regex("\x1B\\[[0-9;]*[mK]"), "");
@@ -55,12 +56,20 @@ void MainMenu::playIntro(ma_engine* audio) {
     static std::vector<char> hoverData = loadAsset(hoverPath);
     static std::vector<char> musicData = loadAsset(musicPath);
     static ma_decoder hoverDec, musicDec;
-    
+
+    if (decodersInitialized) {
+        if (isHoverReady) ma_decoder_uninit(&hoverDec);
+        if (isMusicReady) ma_decoder_uninit(&musicDec);
+        isHoverReady = false;
+        isMusicReady = false;
+    }
+
     if (!hoverData.empty()) {
         ma_result res = ma_decoder_init_memory(hoverData.data(), hoverData.size(), NULL, &hoverDec);
         if (res == MA_SUCCESS) {
             if (ma_sound_init_from_data_source(audio, &hoverDec, 0, NULL, &hoverSfx) == MA_SUCCESS) {
                 isHoverReady = true;
+                decodersInitialized = true;
             }
         } else {
             Logger::getInstance().error("Failed to decode hover SFX from memory!");
@@ -75,6 +84,7 @@ void MainMenu::playIntro(ma_engine* audio) {
             if (ma_sound_init_from_data_source(audio, &musicDec, 0, NULL, &menuMusic) == MA_SUCCESS) {
                 ma_sound_set_volume(&menuMusic, SettingsManager::getInstance().get().musicVolume);
                 isMusicReady = true;
+                decodersInitialized = true;
             }
         } else {
             Logger::getInstance().error("Failed to decode menu music from memory!");
@@ -146,7 +156,7 @@ void MainMenu::playIntro(ma_engine* audio) {
 done:
     if (skipped) {
         Logger::getInstance().info("Intro skipped by user.");
-        ma_uint64 frame = ma_engine_get_sample_rate(audio) * 13;
+        ma_uint64 frame = ma_engine_get_sample_rate(audio) * 11.6;
         if (isMusicReady) ma_sound_seek_to_pcm_frame(&menuMusic, frame);
     }
 }

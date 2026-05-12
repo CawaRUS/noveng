@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <mutex>
 #include "miniaudio.h"
 #include "common.hpp"
 #include "json.hpp"
@@ -64,6 +65,7 @@ public:
     std::map<std::string, std::string> characterColors;
     std::map<std::string, float> characterPitches;
     std::vector<std::unique_ptr<ActiveSound>> activeSounds;
+    std::mutex soundsMutex;
     std::string currentMusicFile = "";
     bool chapterFinished = false;
     ma_engine* getAudio() { return &audio; }

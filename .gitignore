@@ -1,19 +1,33 @@
 
+# Build artifacts
 build/
+dist/
 game.exe
+novpack.exe
 *.o
 *.obj
 *.pdb
+
+# User data
 res/save/*.json
 settings.json
+
+# IDE
 .vscode/
 .vs/
 *.user
 *.userosscache
 *.sln
 *.vcxproj
+
+# System
 Thumbs.db
 .DS_Store
+
+# Claude Code
+.claude/
+
+# Old/temp files
 res/scenario/scenario_old.txt
 res/log/*.log
 dist/*.exe

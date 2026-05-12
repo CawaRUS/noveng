@@ -31,5 +31,5 @@ public:
 private:
     SettingsManager() {}
     ConfigData data;
-    const std::string filePath = "res/json/settings.json";
+    const std::string filePath = std::string(DIR_RES) + "/json/settings.json";
 };

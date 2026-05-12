@@ -124,14 +124,20 @@ bool NovelEngine::loadGame(int slot) {
         GameState state = j.get<GameState>();
 
         this->nextChapterFile = state.currentScene;
-        this->currentEventIdx = state.eventIndex;
         this->characterColors = state.characterColors;
         this->characterPitches = state.characterPitches;
-        this->currentMusicFile = state.currentMusic;
         this->variables = state.variables;
-        
+
+        this->currentEventIdx = state.eventIndex;
+        Logger::getInstance().info("Loaded eventIndex: " + std::to_string(state.eventIndex));
+
         stopAudio();
-        this->chapterFinished = true; 
+
+        if (!state.currentMusic.empty()) {
+            this->currentMusicFile = state.currentMusic;
+        }
+
+        this->chapterFinished = true;
         return true;
     } catch (...) { return false; }
 }
@@ -142,6 +148,7 @@ void NovelEngine::applySettings() {
 }
 
 void NovelEngine::stopAudio() {
+    std::lock_guard<std::mutex> lock(soundsMutex);
     for (auto& s : activeSounds) {
         if (s->initialized) {
             ma_sound_stop(&s->sound);
@@ -151,6 +158,7 @@ void NovelEngine::stopAudio() {
 }
 
 void NovelEngine::cleanupSounds() {
+    std::lock_guard<std::mutex> lock(soundsMutex);
     activeSounds.erase(
         std::remove_if(activeSounds.begin(), activeSounds.end(),
             [](const std::unique_ptr<ActiveSound>& s) {
@@ -164,8 +172,13 @@ void NovelEngine::cleanupSounds() {
 }
 
 void NovelEngine::playSFX(const std::string& filename, float pitch) {
-    if (activeSounds.size() > 20) {
-        cleanupSounds();
+    {
+        std::lock_guard<std::mutex> lock(soundsMutex);
+        if (activeSounds.size() > 20) {
+            soundsMutex.unlock();
+            cleanupSounds();
+            soundsMutex.lock();
+        }
     }
 
     std::filesystem::path path = std::filesystem::path(DIR_RES) / DIR_SFX / filename;
@@ -177,7 +190,7 @@ void NovelEngine::playSFX(const std::string& filename, float pitch) {
 
     auto pActiveSound = std::make_unique<ActiveSound>();
     pActiveSound->data = std::move(data);
-    
+
     ma_result res = ma_decoder_init_memory(pActiveSound->data.data(), pActiveSound->data.size(), NULL, &pActiveSound->decoder);
     if (res != MA_SUCCESS) {
         Logger::getInstance().error("Failed to decode SFX memory: " + filename);
@@ -185,11 +198,13 @@ void NovelEngine::playSFX(const std::string& filename, float pitch) {
     }
 
     res = ma_sound_init_from_data_source(&audio, &pActiveSound->decoder, MA_SOUND_FLAG_DECODE, NULL, &pActiveSound->sound);
-    
+
     if (res == MA_SUCCESS) {
         pActiveSound->initialized = true;
         ma_sound_set_pitch(&pActiveSound->sound, pitch);
         ma_sound_start(&pActiveSound->sound);
+
+        std::lock_guard<std::mutex> lock(soundsMutex);
         activeSounds.push_back(std::move(pActiveSound));
     } else {
         Logger::getInstance().error("Failed to init sound source: " + filename);
@@ -250,6 +265,24 @@ std::string NovelEngine::replaceMacros(std::string text) {
 }
 
 bool NovelEngine::loadScenario(const std::string& filename) {
+    fs::path requestedPath = fs::path(filename);
+    fs::path basePath = fs::path(DIR_RES);
+
+    try {
+        fs::path canonicalRequested = fs::weakly_canonical(requestedPath);
+        fs::path canonicalBase = fs::weakly_canonical(basePath);
+
+        auto [rootEnd, nothing] = std::mismatch(canonicalBase.begin(), canonicalBase.end(),
+                                                 canonicalRequested.begin(), canonicalRequested.end());
+        if (rootEnd != canonicalBase.end()) {
+            Logger::getInstance().error("Path traversal attempt blocked: " + filename);
+            return false;
+        }
+    } catch (const fs::filesystem_error& e) {
+        Logger::getInstance().error("Invalid path: " + filename);
+        return false;
+    }
+
     auto data = readFile(filename);
     if (data.empty()) return false;
 
@@ -263,7 +296,7 @@ bool NovelEngine::loadScenario(const std::string& filename) {
     while (std::getline(stream, line)) {
         line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
         if (line.empty()) continue;
-        
+
         if (line.front() == '[' && line.back() == ']') {
             currentName = line.substr(1, line.size() - 2);
         } else if (line.front() == '{' && line.back() == '}') {
@@ -280,7 +313,12 @@ void NovelEngine::run() {
         executeCommand("play:" + currentMusicFile + "|loop");
     }
 
-    for (size_t i = 0; i < currentEventIdx; ++i) {
+    if (currentEventIdx > events.size()) {
+        Logger::getInstance().warn("currentEventIdx exceeds events size, resetting to 0");
+        currentEventIdx = 0;
+    }
+
+    for (size_t i = 0; i < currentEventIdx && i < events.size(); ++i) {
         if (events[i].type == EventType::COMMAND) {
             const std::string& cmd = events[i].content;
             if (cmd.find("color") != std::string::npos || cmd.find("set") != std::string::npos) {
