@@ -27,10 +27,18 @@ void SettingsManager::load() {
 
         json j;
         file >> j;
-        data = j.get<ConfigData>();
-        
-        Logger::getInstance().info("Settings loaded successfully. Language: " + data.language + 
+
+        // Загружаем поля с проверкой существования
+        if (j.contains("musicVolume")) data.musicVolume = j["musicVolume"];
+        if (j.contains("typingSpeed")) data.typingSpeed = j["typingSpeed"];
+        if (j.contains("language")) data.language = j["language"];
+        if (j.contains("historySize")) data.historySize = j["historySize"];
+
+        Logger::getInstance().info("Settings loaded successfully. Language: " + data.language +
                                    ", Volume: " + std::to_string((int)(data.musicVolume * 100)) + "%");
+
+        // Сохраняем, чтобы добавить отсутствующие поля
+        save();
     } catch (const std::exception& e) {
         Logger::getInstance().error("Error parsing settings: " + std::string(e.what()) + ". Resetting to defaults.");
         save();

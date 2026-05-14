@@ -12,6 +12,7 @@ TARGET_NAME ?= game.exe
 
 DECRYPT ?= false
 ASSET_KEY ?= keyok
+OBFUSCATE ?= false
 
 CXX = g++
 
@@ -38,14 +39,24 @@ CMD_OBJECTS  = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CMD_SOURCES))
 ALL_OBJECTS = $(CORE_OBJECTS) $(CMD_OBJECTS)
 
 TARGET = $(DIST_DIR)/$(TARGET_NAME)
-PACKER_SRC = packer.cpp
+PACKER_SRC = scripts\packer.cpp
 PACKER_EXE = novpack.exe
 
 all: prepare $(PACKER_EXE) $(TARGET) deploy
 
+obfuscate_if_needed:
+ifeq ($(OBFUSCATE),true)
+	@echo [OBFUSCATE] Running code obfuscator...
+	@python scripts\obfuscator.py --source cpp --headers hpp --output build/obfuscated
+	@echo [OBFUSCATE] Complete! Using obfuscated sources.
+else
+	@echo [OBFUSCATE] Disabled. Using original sources.
+endif
+
 $(PACKER_EXE): $(PACKER_SRC)
-	@echo [1/4] Building...
-	@$(CXX) -std=c++17 $(PACKER_SRC) -o $(PACKER_EXE) $(LDFLAGS)
+	@echo [1/4] Building packer...
+	@if exist $(PACKER_EXE) del /F $(PACKER_EXE) 2>nul
+	@$(CXX) -std=c++17 -Ihpp $(PACKER_SRC) -o $(PACKER_EXE) $(LDFLAGS)
 
 prepare:
 	@if not exist $(OBJ_DIR) mkdir $(OBJ_DIR)
@@ -58,7 +69,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp config.cfg
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(TARGET): $(ALL_OBJECTS)
-	@echo [4/4] Linking Game: $@
+	@echo [3/4] Linking Game: $@
 	@$(CXX) $(ALL_OBJECTS) -o $@ $(LDFLAGS)
 
 deploy:
@@ -71,7 +82,7 @@ deploy:
 	) else ( \
 		echo [?] Encryption is DISABLED. Files stay plain. \
 	)
-	@echo [3/4] Build Complete!
+	@echo [4/4] Build Complete!
 
 clean:
 	@echo Cleaning...

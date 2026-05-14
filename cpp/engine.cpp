@@ -4,10 +4,13 @@
 #include "setting.hpp"
 #include "localisation.hpp"
 #include "command.hpp"
+#include "crypto_wrapper.hpp"
 #include <iostream>
 #include <fstream>
 #include <thread>
 #include <chrono>
+
+std::map<std::string, std::vector<char>> NovelEngine::fileCache;
 #include <conio.h>
 #include <map>
 #include <sstream>
@@ -218,24 +221,60 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
 
     for(int x = 0; x < offsetX; ++x) std::cout << " ";
 
+    bool paused = false;
     for (size_t i = 0; i < text.length(); ++i) {
+        // Проверяем паузу ПЕРЕД выводом символа
+        while (paused) {
+            if (_kbhit()) {
+                int ch = _getch();
+                if (ch == 32) { // Пробел - снять паузу
+                    paused = false;
+                    break;
+                } else if (ch == 27) { // ESC - выход в меню
+                    if (i < text.length()) std::cout << text.substr(i);
+                    std::cout << std::endl;
+                    throw std::runtime_error("ESC_TO_MENU");
+                } else if (ch == 13) { // Enter - пропустить
+                    if (i < text.length()) std::cout << text.substr(i);
+                    std::cout << std::endl;
+                    return;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
         std::cout << text[i] << std::flush;
         if (!std::isspace(static_cast<unsigned char>(text[i])) && (i % 2 == 0)) {
-            playSFX("type.mp3", currentPitch); 
+            playSFX("type.mp3", currentPitch);
         }
         if (i % 10 == 0) cleanupSounds();
+
         if (_kbhit()) {
-            if (_getch() == 13) {
+            int ch = _getch();
+            if (ch == 13) { // Enter - пропустить анимацию
                 if (i + 1 < text.length()) std::cout << text.substr(i + 1);
                 break;
+            } else if (ch == 27) { // ESC - выход в меню
+                if (i + 1 < text.length()) std::cout << text.substr(i + 1);
+                std::cout << std::endl;
+                throw std::runtime_error("ESC_TO_MENU");
+            } else if (ch == 32) { // Пробел - пауза
+                paused = true;
             }
         }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(finalSpeed));
     }
     std::cout << std::endl;
 }
 
 std::vector<char> NovelEngine::readFile(const std::string& path) {
+    // Check cache first
+    auto it = fileCache.find(path);
+    if (it != fileCache.end()) {
+        return it->second;
+    }
+
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) return {};
     std::vector<char> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -243,11 +282,18 @@ std::vector<char> NovelEngine::readFile(const std::string& path) {
     if (USE_DECRYPT) {
         std::string key = ASSET_KEY;
         if (!key.empty()) {
-            for (size_t i = 0; i < buffer.size(); ++i) {
-                buffer[i] ^= key[i % key.length()];
+            std::vector<uint8_t> data(buffer.begin(), buffer.end());
+            if (CryptoWrapper::decryptBuffer(data, key)) {
+                buffer.assign(data.begin(), data.end());
+            } else {
+                std::cerr << "[ERROR] ChaCha20 decryption failed for: " << path << std::endl;
+                return {};
             }
         }
     }
+
+    // Cache the decrypted file
+    fileCache[path] = buffer;
     return buffer;
 }
 
@@ -340,18 +386,35 @@ void NovelEngine::run() {
             std::string currentColor = characterColors.count(ev.name) ? characterColors[ev.name] : CLR_NAME;
             std::string processedText = replaceMacros(ev.content);
             history.push_back({ev.name, processedText, currentColor});
-            if(history.size() > 8) history.erase(history.begin());
+
+            // Ограничение размера истории (настраиваемое)
+            size_t maxHistory = SettingsManager::getInstance().get().historySize;
+            if(history.size() > maxHistory) history.erase(history.begin());
+
             this->lastSpeaker = ev.name;
             this->lastFullText = processedText;
             std::cout << "\n" << currentColor << ">>> " << ev.name << " <<<" << CLR_RESET << std::endl;
             std::cout << CLR_TEXT;
-            typeText(processedText, 30);
+            try {
+                typeText(processedText, 30);
+            } catch (const std::runtime_error& e) {
+                if (std::string(e.what()) == "ESC_TO_MENU") {
+                    std::cout << CLR_RESET;
+                    Logger::getInstance().info("User pressed ESC, returning to menu");
+                    return; // Выход в главное меню
+                }
+                throw; // Пробрасываем другие исключения
+            }
             std::cout << CLR_RESET;
 
             while (true) {
                 cleanupSounds();
                 if (_kbhit()) {
                     int ch = _getch();
+                    if (ch == 27) { // ESC в режиме ожидания
+                        Logger::getInstance().info("User pressed ESC, returning to menu");
+                        return;
+                    }
                     if (ch == 's' || ch == 'S') { saveGame(1); continue; }
                     if (ch == 13) break;
                 }

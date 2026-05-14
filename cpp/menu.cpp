@@ -1,8 +1,9 @@
 #include "menu.hpp"
 #include "common.hpp"
+#include "crypto_wrapper.hpp"
 #include <iostream>
 #include <string>
-#include <vector> 
+#include <vector>
 #include <conio.h>
 #include <chrono>
 #include "setting.hpp"
@@ -43,8 +44,9 @@ void MainMenu::playIntro(ma_engine* audio) {
         #if USE_DECRYPT == 1
             std::string key = ASSET_KEY;
             if (!key.empty()) {
-                for (size_t i = 0; i < buffer.size(); ++i) {
-                    buffer[i] ^= key[i % key.length()];
+                std::vector<uint8_t> data(buffer.begin(), buffer.end());
+                if (CryptoWrapper::decryptBuffer(data, key)) {
+                    buffer.assign(data.begin(), data.end());
                 }
             }
         #endif
@@ -165,12 +167,12 @@ void MainMenu::showSettings() {
     Logger::getInstance().info("Entering Settings menu.");
     auto& settings = SettingsManager::getInstance().get();
     int selected = 0;
-    const int maxOptions = 3;
+    const int maxOptions = 4;
 
     while (true) {
         clearScreen();
         std::cout << "\n    --- " << LocalizationManager::getInstance().get("settings_title") << " ---\n\n";
-        
+
         if (selected == 0) std::cout << " > "; else std::cout << "   ";
         std::cout << LocalizationManager::getInstance().get("setting_volume") << ": " << (int)(settings.musicVolume * 100) << "%\n";
 
@@ -179,6 +181,9 @@ void MainMenu::showSettings() {
 
         if (selected == 2) std::cout << " > "; else std::cout << "   ";
         std::cout << LocalizationManager::getInstance().get("setting_lang") << ": " << settings.language << "\n";
+
+        if (selected == 3) std::cout << " > "; else std::cout << "   ";
+        std::cout << LocalizationManager::getInstance().get("setting_history") << ": " << settings.historySize << "\n";
 
         std::cout << "\n [ Esc - " << LocalizationManager::getInstance().get("btn_save_exit") << " | \x1B[2D\x1B[2C - " << LocalizationManager::getInstance().get("btn_change") << " ]";
 
@@ -195,7 +200,7 @@ void MainMenu::showSettings() {
                 if (isHoverReady) ma_sound_seek_to_pcm_frame(&hoverSfx, 0);
                 if (isHoverReady) ma_sound_start(&hoverSfx);
             }
-            
+
             if (selected == 0) {
                 if (key == 75) settings.musicVolume = std::max(0.0f, settings.musicVolume - 0.05f);
                 if (key == 77) settings.musicVolume = std::min(1.0f, settings.musicVolume + 0.05f);
@@ -210,6 +215,10 @@ void MainMenu::showSettings() {
                     LocalizationManager::getInstance().switchLanguage(key == 77, settings.language);
                     Logger::getInstance().info("Language switched to: " + settings.language);
                 }
+            }
+            if (selected == 3) {
+                if (key == 75) settings.historySize = std::max(5, settings.historySize - 5);
+                if (key == 77) settings.historySize = std::min(50, settings.historySize + 5);
             }
         }
     }

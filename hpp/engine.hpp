@@ -75,6 +75,7 @@ public:
     void resetChapterFlag() { chapterFinished = false; nextChapterFile = ""; }
     std::string nextChapterFile = "";
     std::vector<char> readFile(const std::string& path);
+    static std::map<std::string, std::vector<char>> fileCache;
     std::string currentSpeaker;
     void saveGame(int slot = 1);
     bool loadGame(int slot = 1);

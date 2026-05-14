@@ -12,9 +12,10 @@ struct ConfigData {
     float musicVolume = 0.5f;
     int typingSpeed = 30;
     std::string language = DEFAULT_LANG;
+    int historySize = 20;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ConfigData, musicVolume, typingSpeed, language)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ConfigData, musicVolume, typingSpeed, language, historySize)
 
 class SettingsManager {
 public:
