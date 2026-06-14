@@ -6,6 +6,7 @@
 #include <string>
 #include <filesystem>
 #include <cstring>
+#include <random>
 
 namespace fs = std::filesystem;
 
@@ -83,9 +84,13 @@ bool encryptBuffer(std::vector<uint8_t>& buffer, const std::string& keyString) {
     key256_t key;
     sha256(keyString, key);
 
+    // Generate random nonce (12 bytes)
     nonce96_t nonce;
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    std::uniform_int_distribution<int> distribution(0, 255);
     for (int i = 0; i < 12; ++i) {
-        nonce[i] = key[i] ^ key[20 + i];
+        nonce[i] = static_cast<uint8_t>(distribution(generator));
     }
 
     std::vector<uint8_t> encrypted;

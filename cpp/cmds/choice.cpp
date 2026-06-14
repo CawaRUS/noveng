@@ -14,9 +14,18 @@ class CmdChoice : public ICommand {
 public:
     void execute(NovelEngine* eng, const std::vector<std::string>& args) override {
         Logger::getInstance().info("Command: choice started.");
-        std::cout << "\n" << CLR_NAME << LocalizationManager::getInstance().get("choice_header") << CLR_RESET << std::endl;
         
         int numOptions = (int)(args.size() / 2);
+        if (numOptions < 1) {
+            Logger::getInstance().error("Command: choice has no options!");
+            return;
+        }
+        if (numOptions > 9) {
+            Logger::getInstance().warn("Command: choice has more than 9 options. Clamping to 9.");
+            numOptions = 9;
+        }
+
+        std::cout << "\n" << CLR_NAME << LocalizationManager::getInstance().get("choice_header") << CLR_RESET << std::endl;
         for (int i = 0; i < numOptions; ++i) {
             std::cout << "  " << (i + 1) << ". " << args[i * 2] << std::endl;
         }

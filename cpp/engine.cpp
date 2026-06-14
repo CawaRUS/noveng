@@ -113,7 +113,16 @@ void NovelEngine::saveGame(int slot) {
     if (file.is_open()) {
         json j = state;
         file << j.dump(4);
-        std::cout << "\n" << LocalizationManager::getInstance().get("save_success") << " [" << slot << "]" << std::endl;
+        
+        std::string speaker = LocalizationManager::getInstance().get("system_name");
+        std::string msg = LocalizationManager::getInstance().get("system_save_message") + " [" + std::to_string(slot) + "]";
+        history.push_back({speaker, msg, CLR_SYSTEM});
+        
+        size_t maxHistory = SettingsManager::getInstance().get().historySize;
+        if (history.size() > maxHistory) {
+            history.erase(history.begin());
+        }
+        render();
     }
 }
 
@@ -126,7 +135,7 @@ bool NovelEngine::loadGame(int slot) {
         json j; file >> j;
         GameState state = j.get<GameState>();
 
-        this->nextChapterFile = state.currentScene;
+        this->currentChapterFile = state.currentScene;
         this->characterColors = state.characterColors;
         this->characterPitches = state.characterPitches;
         this->variables = state.variables;
@@ -140,7 +149,7 @@ bool NovelEngine::loadGame(int slot) {
             this->currentMusicFile = state.currentMusic;
         }
 
-        this->chapterFinished = true;
+        this->chapterFinished = false;
         return true;
     } catch (...) { return false; }
 }
@@ -222,8 +231,20 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
     for(int x = 0; x < offsetX; ++x) std::cout << " ";
 
     bool paused = false;
-    for (size_t i = 0; i < text.length(); ++i) {
-        // Проверяем паузу ПЕРЕД выводом символа
+    int charCount = 0;
+    for (size_t i = 0; i < text.length(); ) {
+        size_t charLen = 1;
+        unsigned char lead = static_cast<unsigned char>(text[i]);
+        if (lead >= 0xF0) charLen = 4;
+        else if (lead >= 0xE0) charLen = 3;
+        else if (lead >= 0xC0) charLen = 2;
+        
+        if (i + charLen > text.length()) {
+            charLen = text.length() - i;
+        }
+
+        std::string character = text.substr(i, charLen);
+
         while (paused) {
             if (_kbhit()) {
                 int ch = _getch();
@@ -243,19 +264,26 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
-        std::cout << text[i] << std::flush;
-        if (!std::isspace(static_cast<unsigned char>(text[i])) && (i % 2 == 0)) {
+        std::cout << character << std::flush;
+        
+        bool isCharSpace = false;
+        if (charLen == 1 && std::isspace(static_cast<unsigned char>(character[0]))) {
+            isCharSpace = true;
+        }
+        if (!isCharSpace && (charCount % 2 == 0)) {
             playSFX("type.mp3", currentPitch);
         }
-        if (i % 10 == 0) cleanupSounds();
+        charCount++;
+
+        if (charCount % 10 == 0) cleanupSounds();
 
         if (_kbhit()) {
             int ch = _getch();
             if (ch == 13) { // Enter - пропустить анимацию
-                if (i + 1 < text.length()) std::cout << text.substr(i + 1);
+                if (i + charLen < text.length()) std::cout << text.substr(i + charLen);
                 break;
             } else if (ch == 27) { // ESC - выход в меню
-                if (i + 1 < text.length()) std::cout << text.substr(i + 1);
+                if (i + charLen < text.length()) std::cout << text.substr(i + charLen);
                 std::cout << std::endl;
                 throw std::runtime_error("ESC_TO_MENU");
             } else if (ch == 32) { // Пробел - пауза
@@ -264,6 +292,7 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(finalSpeed));
+        i += charLen;
     }
     std::cout << std::endl;
 }
@@ -387,7 +416,6 @@ void NovelEngine::run() {
             std::string processedText = replaceMacros(ev.content);
             history.push_back({ev.name, processedText, currentColor});
 
-            // Ограничение размера истории (настраиваемое)
             size_t maxHistory = SettingsManager::getInstance().get().historySize;
             if(history.size() > maxHistory) history.erase(history.begin());
 
@@ -401,9 +429,9 @@ void NovelEngine::run() {
                 if (std::string(e.what()) == "ESC_TO_MENU") {
                     std::cout << CLR_RESET;
                     Logger::getInstance().info("User pressed ESC, returning to menu");
-                    return; // Выход в главное меню
+                    return;
                 }
-                throw; // Пробрасываем другие исключения
+                throw;
             }
             std::cout << CLR_RESET;
 
@@ -411,7 +439,7 @@ void NovelEngine::run() {
                 cleanupSounds();
                 if (_kbhit()) {
                     int ch = _getch();
-                    if (ch == 27) { // ESC в режиме ожидания
+                    if (ch == 27) {
                         Logger::getInstance().info("User pressed ESC, returning to menu");
                         return;
                     }

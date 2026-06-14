@@ -1,5 +1,6 @@
 #include "command.hpp"
 #include "engine.hpp"
+#include "common.hpp"
 #include <iostream>
 
 class CmdClear : public ICommand {
@@ -8,11 +9,7 @@ public:
         eng->history.clear(); 
         eng->lastFullText = "";
         eng->lastSpeaker = "";
-        #ifdef _WIN32
-            system("cls");
-        #else
-            std::cout << "\033[2J\033[H" << std::flush;
-        #endif
+        clearScreen();
     }
 };
 

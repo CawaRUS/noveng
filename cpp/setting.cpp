@@ -8,9 +8,10 @@ namespace fs = std::filesystem;
 void SettingsManager::load() {
     Logger::getInstance().info("Loading application settings...");
 
-    if (!fs::exists("res/json")) {
-        Logger::getInstance().debug("Settings directory not found. Creating 'res/json'...");
-        fs::create_directories("res/json");
+    fs::path parentDir = fs::path(filePath).parent_path();
+    if (!fs::exists(parentDir)) {
+        Logger::getInstance().debug("Settings directory not found. Creating: " + parentDir.string());
+        fs::create_directories(parentDir);
     }
 
     if (!fs::exists(filePath)) {
@@ -28,7 +29,6 @@ void SettingsManager::load() {
         json j;
         file >> j;
 
-        // Загружаем поля с проверкой существования
         if (j.contains("musicVolume")) data.musicVolume = j["musicVolume"];
         if (j.contains("typingSpeed")) data.typingSpeed = j["typingSpeed"];
         if (j.contains("language")) data.language = j["language"];
@@ -37,7 +37,6 @@ void SettingsManager::load() {
         Logger::getInstance().info("Settings loaded successfully. Language: " + data.language +
                                    ", Volume: " + std::to_string((int)(data.musicVolume * 100)) + "%");
 
-        // Сохраняем, чтобы добавить отсутствующие поля
         save();
     } catch (const std::exception& e) {
         Logger::getInstance().error("Error parsing settings: " + std::string(e.what()) + ". Resetting to defaults.");

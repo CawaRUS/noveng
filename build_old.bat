@@ -2,7 +2,12 @@
 setlocal enabledelayedexpansion
 
 if exist config.cfg (
-    for /f "delims=" %%x in (config.cfg) do (set "%%x")
+    for /f "delims=" %%x in (config.cfg) do (
+        set "line=%%x"
+        if not "!line:~0,1!"=="#" (
+            set "%%x"
+        )
+    )
 )
 
 if "%TARGET_NAME%"=="" set TARGET_NAME=game.exe
@@ -12,15 +17,21 @@ if "%DIR_MUSIC%"=="" set DIR_MUSIC=music
 if "%DIR_SFX%"=="" set DIR_SFX=sfx
 if "%DIR_SAVE%"=="" set DIR_SAVE=save
 if "%USE_CUSTOM_ABOUT%"=="" set USE_CUSTOM_ABOUT=false
+if "%DECRYPT%"=="" set DECRYPT=false
+if "%ASSET_KEY%"=="" set ASSET_KEY=keyok
+if "%DEFAULT_LANG%"=="" set DEFAULT_LANG=ru
+
+if "%USE_CUSTOM_ABOUT%"=="true" (set USE_CUSTOM_ABOUT_VAL=1) else (set USE_CUSTOM_ABOUT_VAL=0)
+if "%DECRYPT%"=="true" (set USE_DECRYPT_VAL=1) else (set USE_DECRYPT_VAL=0)
 
 set SRC_DIR=cpp
 set HDR_DIR=hpp
 set OBJ_DIR=build
 set LIBS=-lole32 -lwinmm
 
-set DEFINES=-DAPP_VERSION=\"%APP_VERSION%\" -DAPP_NAME=\"%APP_NAME%\" ^
--DUSE_CUSTOM_ABOUT=%USE_CUSTOM_ABOUT% -DDIR_RES=\"%DIR_RES%\" -DDIR_SCENARIO=\"%DIR_SCENARIO%\" ^
--DDIR_MUSIC=\"%DIR_MUSIC%\" -DDIR_SFX=\"%DIR_SFX%\" -DDIR_SAVE=\"%DIR_SAVE%\"
+set DEFINES=-DAPP_VERSION=\"%APP_VERSION%\" -DAPP_NAME=\"%APP_NAME%\" -DDEFAULT_LANG=\"%DEFAULT_LANG%\" ^
+-DUSE_CUSTOM_ABOUT=%USE_CUSTOM_ABOUT_VAL% -DUSE_DECRYPT=%USE_DECRYPT_VAL% -DASSET_KEY=\"%ASSET_KEY%\" ^
+-DDIR_RES=\"%DIR_RES%\" -DDIR_SCENARIO=\"%DIR_SCENARIO%\" -DDIR_MUSIC=\"%DIR_MUSIC%\" -DDIR_SFX=\"%DIR_SFX%\" -DDIR_SAVE=\"%DIR_SAVE%\"
 
 echo [1/4] Cleaning old files...
 if exist %TARGET_NAME% del %TARGET_NAME%

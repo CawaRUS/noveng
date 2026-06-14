@@ -26,7 +26,7 @@ public:
     }
 
     bool loadLanguage(const std::string& langCode) {
-        std::string path = "res/localisation/" + langCode + ".json";
+        std::string path = std::string(DIR_RES) + "/localisation/" + langCode + ".json";
         std::ifstream file(path);
         if (!file.is_open()) {
             std::cerr << "Не удалось найти файл локализации: " << path << std::endl;
@@ -54,12 +54,13 @@ public:
     }
 
     void updateAvailableLanguages() {
-        if (!fs::exists("res/localisation")) {
-            fs::create_directories("res/localisation");
+        fs::path locDir = fs::path(DIR_RES) / "localisation";
+        if (!fs::exists(locDir)) {
+            fs::create_directories(locDir);
         }
         
         availableLangs.clear();
-        for (const auto& entry : fs::directory_iterator("res/localisation")) {
+        for (const auto& entry : fs::directory_iterator(locDir)) {
             if (entry.path().extension() == ".json") {
                 availableLangs.push_back(entry.path().stem().string());
             }

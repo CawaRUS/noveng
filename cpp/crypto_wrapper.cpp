@@ -2,6 +2,7 @@
 #include "ChaCha20.h"
 #include "crypto_wrapper.hpp"
 #include <cstring>
+#include <random>
 
 namespace CryptoWrapper {
 
@@ -81,10 +82,13 @@ bool encryptBuffer(std::vector<uint8_t>& buffer, const std::string& keyString) {
     key256_t key;
     sha256(keyString, key);
 
-    // Generate nonce from key (deterministic)
+    // Generate random nonce (12 bytes)
     nonce96_t nonce;
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    std::uniform_int_distribution<int> distribution(0, 255);
     for (int i = 0; i < 12; ++i) {
-        nonce[i] = key[i] ^ key[20 + i];
+        nonce[i] = static_cast<uint8_t>(distribution(generator));
     }
 
     // Prepend nonce to buffer (so we can decrypt later)

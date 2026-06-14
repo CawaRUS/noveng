@@ -18,12 +18,15 @@ public:
         } catch (...) {
         }
 
+        duration = std::max(0, duration);
+        intensity = std::max(0, std::abs(intensity));
+
         int oldX = eng->offsetX;
         int oldY = eng->offsetY;
 
         for (int i = 0; i < duration; ++i) {
-            eng->offsetX = (std::rand() % (intensity * 2 + 1)) - intensity;
-            eng->offsetY = (std::rand() % (intensity / 2 + 1));
+            eng->offsetX = (intensity == 0) ? 0 : (std::rand() % (intensity * 2 + 1)) - intensity;
+            eng->offsetY = (intensity == 0) ? 0 : (std::rand() % (intensity / 2 + 1));
             
             eng->render(); 
             
