@@ -4,12 +4,12 @@
 #include "logger.hpp"
 #include "expression.hpp"
 
-class CmdSet : public ICommand {
+class CmdGlobalSet : public ICommand {
 public:
     void execute(NovelEngine* eng, const std::vector<std::string>& args) override {
         if (args.size() < 2 || args[0].empty() || args[1].empty()) return;
         if (!isValidIdentifier(args[0])) {
-            Logger::getInstance().warn("Command: set refused invalid variable name: " + args[0]);
+            Logger::getInstance().warn("Command: global_set refused invalid variable name: " + args[0]);
             return;
         }
 
@@ -17,11 +17,10 @@ public:
         bool useExpression = (args.size() < 3);
 
         if (!useExpression) {
-            // Explicit type: parse literally, do not treat value as expression.
             try {
                 value = parseVariant(args[1], args[2]);
             } catch (const std::exception& e) {
-                Logger::getInstance().warn("Command: set could not parse value '" + args[1] + "' as " + args[2] + ": " + e.what());
+                Logger::getInstance().warn("Command: global_set could not parse value '" + args[1] + "' as " + args[2] + ": " + e.what());
                 return;
             }
         } else {
@@ -37,14 +36,16 @@ public:
                 try {
                     value = autoDetectVariant(args[1]);
                 } catch (const std::exception& e) {
-                    Logger::getInstance().warn("Command: set could not parse value '" + args[1] + "': " + e.what());
+                    Logger::getInstance().warn("Command: global_set could not parse value '" + args[1] + "': " + e.what());
                     return;
                 }
             }
         }
 
+        eng->persistentVariables[args[0]] = value;
         eng->variables[args[0]] = value;
-        Logger::getInstance().debug("Set variable " + args[0] + " = " + variantToString(value));
+        eng->savePersistent();
+        Logger::getInstance().debug("Set persistent variable " + args[0] + " = " + variantToString(value));
     }
 };
-REGISTER_COMMAND(CmdSet, "set")
+REGISTER_COMMAND(CmdGlobalSet, "global_set")

@@ -1,6 +1,7 @@
 #define CHACHA20_IMPLEMENTATION
 #include "ChaCha20.h"
 #include "crypto_wrapper.hpp"
+#include "crypto_format.hpp"
 #include <cstring>
 #include <random>
 
@@ -87,20 +88,21 @@ bool encryptBuffer(std::vector<uint8_t>& buffer, const std::string& keyString) {
     std::random_device rd;
     std::mt19937 generator(rd());
     std::uniform_int_distribution<int> distribution(0, 255);
-    for (int i = 0; i < 12; ++i) {
+    for (size_t i = 0; i < CryptoFormat::NONCE_SIZE; ++i) {
         nonce[i] = static_cast<uint8_t>(distribution(generator));
     }
 
-    // Prepend nonce to buffer (so we can decrypt later)
+    // Format: [magic][nonce][encrypted payload]
     std::vector<uint8_t> encrypted;
-    encrypted.reserve(12 + buffer.size());
-    encrypted.insert(encrypted.end(), nonce, nonce + 12);
+    encrypted.reserve(CryptoFormat::HEADER_SIZE + buffer.size());
+    encrypted.insert(encrypted.end(), CryptoFormat::MAGIC.begin(), CryptoFormat::MAGIC.end());
+    encrypted.insert(encrypted.end(), nonce, nonce + CryptoFormat::NONCE_SIZE);
     encrypted.insert(encrypted.end(), buffer.begin(), buffer.end());
 
-    // Encrypt the data part (skip nonce)
+    // Encrypt the payload part (skip header)
     ChaCha20_Ctx ctx;
     ChaCha20_init(&ctx, key, nonce, 0);
-    ChaCha20_xor(&ctx, encrypted.data() + 12, buffer.size());
+    ChaCha20_xor(&ctx, encrypted.data() + CryptoFormat::HEADER_SIZE, buffer.size());
 
     buffer = encrypted;
     return true;
@@ -108,25 +110,45 @@ bool encryptBuffer(std::vector<uint8_t>& buffer, const std::string& keyString) {
 
 // ChaCha20 decryption
 bool decryptBuffer(std::vector<uint8_t>& buffer, const std::string& keyString) {
-    if (buffer.size() < 12 || keyString.empty()) return false;
+    if (buffer.size() < CryptoFormat::HEADER_SIZE || keyString.empty()) return false;
+
+    // Verify magic header; refuse to decrypt files without it to avoid
+    // re-decrypting already-processed assets.
+    if (!CryptoFormat::hasMagic(buffer)) {
+        return false;
+    }
 
     // Derive 32-byte key from string
     key256_t key;
     sha256(keyString, key);
 
-    // Extract nonce from first 12 bytes
+    // Extract nonce from bytes following the magic header
     nonce96_t nonce;
-    std::memcpy(nonce, buffer.data(), 12);
+    std::memcpy(nonce, buffer.data() + CryptoFormat::MAGIC.size(), CryptoFormat::NONCE_SIZE);
 
-    // Decrypt the data part (skip nonce)
+    // Decrypt the payload part (skip header)
     ChaCha20_Ctx ctx;
     ChaCha20_init(&ctx, key, nonce, 0);
-    ChaCha20_xor(&ctx, buffer.data() + 12, buffer.size() - 12);
+    ChaCha20_xor(&ctx, buffer.data() + CryptoFormat::HEADER_SIZE, buffer.size() - CryptoFormat::HEADER_SIZE);
 
-    // Remove nonce from buffer
-    std::vector<uint8_t> decrypted(buffer.begin() + 12, buffer.end());
+    // Remove header from buffer
+    std::vector<uint8_t> decrypted(buffer.begin() + CryptoFormat::HEADER_SIZE, buffer.end());
     buffer = decrypted;
     return true;
+}
+
+std::string deriveSaveKey(const std::string& assetKey) {
+    static const std::string salt = "NOVENG_SAVE_SALT_v1";
+    std::string input = assetKey + salt;
+    uint8_t hash[32];
+    sha256(input, hash);
+
+    std::string result;
+    result.reserve(32);
+    for (int i = 0; i < 32; ++i) {
+        result.push_back(static_cast<char>(hash[i]));
+    }
+    return result;
 }
 
 } // namespace CryptoWrapper

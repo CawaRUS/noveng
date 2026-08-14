@@ -11,8 +11,15 @@ APP_VERSION ?= 0.5
 TARGET_NAME ?= game.exe
 
 DECRYPT ?= false
-ASSET_KEY ?= keyok
+ASSET_KEY ?= $(NOVENG_ASSET_KEY)
 OBFUSCATE ?= false
+
+# Require a key when encryption is enabled.
+ifeq ($(strip $(DECRYPT)),true)
+ifeq ($(strip $(ASSET_KEY)),)
+  $(error ASSET_KEY is required when DECRYPT=true. Set NOVENG_ASSET_KEY environment variable or ASSET_KEY in config.cfg.)
+endif
+endif
 
 CXX = g++
 
@@ -39,32 +46,34 @@ CMD_OBJECTS  = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CMD_SOURCES))
 ALL_OBJECTS = $(CORE_OBJECTS) $(CMD_OBJECTS)
 
 TARGET = $(DIST_DIR)/$(TARGET_NAME)
-PACKER_SRC = scripts\packer.cpp
+PACKER_SRC = scripts/packer.cpp
 PACKER_EXE = novpack.exe
 
-all: prepare $(PACKER_EXE) $(TARGET) deploy
+all: deploy
+
+deploy: prepare $(PACKER_EXE) $(TARGET)
 
 obfuscate_if_needed:
 ifeq ($(OBFUSCATE),true)
 	@echo [OBFUSCATE] Running code obfuscator...
-	@python scripts\obfuscator.py --source cpp --headers hpp --output build/obfuscated
+	@python scripts/obfuscator.py --source cpp --headers hpp --output build/obfuscated
 	@echo [OBFUSCATE] Complete! Using obfuscated sources.
 else
 	@echo [OBFUSCATE] Disabled. Using original sources.
 endif
 
-$(PACKER_EXE): $(PACKER_SRC)
+$(PACKER_EXE): $(PACKER_SRC) $(OBJ_DIR)/crypto_wrapper.o
 	@echo [1/4] Building packer...
-	@if exist $(PACKER_EXE) del /F $(PACKER_EXE) 2>nul
-	@$(CXX) -std=c++17 -Ihpp $(PACKER_SRC) -o $(PACKER_EXE) $(LDFLAGS)
+	@rm -f $(PACKER_EXE)
+	@$(CXX) -std=c++17 -I$(HDR_DIR) $(PACKER_SRC) $(OBJ_DIR)/crypto_wrapper.o -o $(PACKER_EXE) $(LDFLAGS)
 
 prepare:
-	@if not exist $(OBJ_DIR) mkdir $(OBJ_DIR)
-	@if not exist $(OBJ_DIR)\cmds mkdir $(OBJ_DIR)\cmds
-	@if not exist $(DIST_DIR) mkdir $(DIST_DIR)
+	@mkdir -p $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)/cmds
+	@mkdir -p $(DIST_DIR)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp config.cfg
-	@if not exist $(subst /,\,$(dir $@)) mkdir $(subst /,\,$(dir $@))
+	@mkdir -p $(dir $@)
 	@echo Compiling: $<...
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -74,21 +83,21 @@ $(TARGET): $(ALL_OBJECTS)
 
 deploy:
 	@echo [2/4] Deploying assets to $(DIST_DIR)...
-	@if not exist $(subst /,\,$(DIST_DIR)\$(DIR_RES)) mkdir $(subst /,\,$(DIST_DIR)\$(DIR_RES))
-	@xcopy /E /I /Y $(subst /,\,$(DIR_RES)) $(subst /,\,$(DIST_DIR)\$(DIR_RES)) >nul
-	@if /I "$(DECRYPT)"=="true" ( \
-		echo [!] Encryption is ENABLED. Processing files... & \
-		$(PACKER_EXE) $(DIST_DIR)/$(DIR_RES) $(ASSET_KEY) \
-	) else ( \
-		echo [?] Encryption is DISABLED. Files stay plain. \
-	)
+	@mkdir -p $(DIST_DIR)/$(DIR_RES)
+	@cp -r $(DIR_RES)/* $(DIST_DIR)/$(DIR_RES)/
+ifeq ($(strip $(DECRYPT)),true)
+	@echo [!] Encryption is ENABLED. Processing files...
+	@$(PACKER_EXE) $(DIST_DIR)/$(DIR_RES) $(ASSET_KEY)
+else
+	@echo [?] Encryption is DISABLED. Files stay plain.
+endif
 	@echo [4/4] Build Complete!
 
 clean:
 	@echo Cleaning...
-	@if exist $(OBJ_DIR) rd /s /q $(OBJ_DIR)
-	@if exist $(DIST_DIR) rd /s /q $(DIST_DIR)
-	@if exist $(PACKER_EXE) del $(PACKER_EXE)
+	@rm -rf $(OBJ_DIR)
+	@rm -rf $(DIST_DIR)
+	@rm -f $(PACKER_EXE)
 
 run: all
 	@echo Running $(TARGET_NAME)...

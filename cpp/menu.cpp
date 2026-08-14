@@ -1,6 +1,7 @@
 #include "menu.hpp"
 #include "common.hpp"
 #include "crypto_wrapper.hpp"
+#include "save_manager.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -130,32 +131,40 @@ void MainMenu::playIntro(ma_engine* audio) {
 
     std::cout << "\n\n\n";
     typeWrite("\t\t   ~ " + LocalizationManager::getInstance().get("intro_presents") + " ~\n", 40);
-    if (waitOrSkip(1200)) { skipped = true; goto done; }
+    if (!skipped) skipped = waitOrSkip(1200);
 
-    clearScreen();
-    std::cout << "\n\n";
-    for (char c : logo) {
-        std::cout << c << std::flush;
-        if (c == '\n') {
-            std::this_thread::sleep_for(std::chrono::milliseconds(120));
-            if (_kbhit() && _getch() == 13) { skipped = true; goto done; }
+    if (!skipped) {
+        clearScreen();
+        std::cout << "\n\n";
+        for (char c : logo) {
+            std::cout << c << std::flush;
+            if (c == '\n') {
+                std::this_thread::sleep_for(std::chrono::milliseconds(120));
+                if (_kbhit() && _getch() == 13) {
+                    skipped = true;
+                    break;
+                }
+            }
         }
     }
-    if (waitOrSkip(800)) { skipped = true; goto done; }
 
-    std::cout << "\n";
-    typeWrite("\t\t       [ " + LocalizationManager::getInstance().get("intro_start") + " ]", 35);
-    if (waitOrSkip(500)) { skipped = true; goto done; }
+    if (!skipped) skipped = waitOrSkip(800);
 
-    {
+    if (!skipped) {
+        std::cout << "\n";
+        typeWrite("\t\t       [ " + LocalizationManager::getInstance().get("intro_start") + " ]", 35);
+        skipped = waitOrSkip(500);
+    }
+
+    if (!skipped) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - startTime).count();
         long long remaining = 13000 - elapsed;
-        if (remaining > 0 && waitOrSkip(static_cast<int>(remaining)))
-            skipped = true;
+        if (remaining > 0) {
+            skipped = waitOrSkip(static_cast<int>(remaining));
+        }
     }
 
-done:
     if (skipped) {
         Logger::getInstance().info("Intro skipped by user.");
         ma_uint64 frame = ma_engine_get_sample_rate(audio) * 11.6;
@@ -226,7 +235,11 @@ void MainMenu::showSettings() {
     Logger::getInstance().info("Settings saved and exited.");
 }
 
-int MainMenu::show() {
+void MainMenu::setEngine(NovelEngine* eng) {
+    engine = eng;
+}
+
+MenuResult MainMenu::show() {
     if (isMusicReady && ma_sound_is_playing(&menuMusic) == MA_FALSE) {
         ma_sound_seek_to_pcm_frame(&menuMusic, 0);
         ma_sound_start(&menuMusic);
@@ -240,40 +253,46 @@ int MainMenu::show() {
     SetConsoleCursorInfo(hConsole, &cursorInfo);
 
     while (true) {
-        fs::path savePath = fs::path(DIR_RES) / DIR_SAVE / "save1.json";
-        bool hasSave = fs::exists(savePath);
-        
+        SaveManager::SaveInfo latestSave = SaveManager::getLatestSave();
+        bool hasSave = latestSave.exists;
+
         auto& lm = LocalizationManager::getInstance();
 
-        std::vector<std::string> items;
-        if (hasSave) items.push_back(lm.get("menu_continue"));
-        items.push_back(lm.get("menu_new_game"));
-        items.push_back(lm.get("menu_settings"));
-        items.push_back(lm.get("menu_about"));
-        items.push_back(lm.get("menu_exit"));
+        struct MenuItem {
+            std::string text;
+            MenuResult::Action action;
+        };
+
+        std::vector<MenuItem> items;
+        if (hasSave) items.push_back({lm.get("menu_continue"), MenuResult::Continue});
+        items.push_back({lm.get("menu_load"), MenuResult::LoadSlot});
+        items.push_back({lm.get("menu_new_game"), MenuResult::NewGame});
+        items.push_back({lm.get("menu_settings"), MenuResult::Settings});
+        items.push_back({lm.get("menu_about"), MenuResult::About});
+        items.push_back({lm.get("menu_exit"), MenuResult::Exit});
 
         const int itemCount = static_cast<int>(items.size());
         const int innerWidth = 36;
 
         clearScreen();
-        
+
         std::cout << "\n\n     \x1B[1;36m╔════════════════════════════════════╗\x1B[0m\n";
-        
+
         std::string titleText = std::string(APP_NAME) + "  v" + std::string(APP_VERSION);
         int titleLen = getVisibleLength(titleText);
         int padLeft = (innerWidth - titleLen) / 2;
         int padRight = innerWidth - titleLen - padLeft;
-        
+
         std::cout << "     \x1B[1;36m║\x1B[0m" << std::string(padLeft, ' ') << titleText << std::string(padRight, ' ') << "\x1B[1;36m║\x1B[0m\n";
-        
+
         std::cout << "     \x1B[1;36m╠════════════════════════════════════╣\x1B[0m\n";
         std::cout << "     \x1B[1;36m║\x1B[0m" << std::string(innerWidth, ' ') << "\x1B[1;36m║\x1B[0m\n";
 
         for (int i = 0; i < itemCount; i++) {
             std::string prefix = (i == selected) ? " > " : "   ";
-            std::string text = items[i];
+            std::string text = items[i].text;
             std::string fullLine = prefix + text;
-            
+
             int visibleLen = getVisibleLength(fullLine);
             int spacesToAdd = innerWidth - visibleLen - 2;
             if (spacesToAdd < 0) spacesToAdd = 0;
@@ -290,7 +309,7 @@ int MainMenu::show() {
         std::cout << "     \x1B[1;36m║\x1B[0m" << std::string(innerWidth, ' ') << "\x1B[1;36m║\x1B[0m\n";
         std::cout << "     \x1B[1;36m╚════════════════════════════════════╝\x1B[0m\n";
         std::cout << "\n     [ " << lm.get("menu_hint") << " ]\n";
-        
+
         int key = _getch();
 
         if (key == 0xE0 || key == 0) {
@@ -298,7 +317,7 @@ int MainMenu::show() {
             key = _getch();
             if (key == 72) selected = (selected - 1 + itemCount) % itemCount; // ↑
             if (key == 80) selected = (selected + 1) % itemCount;             // ↓
-            
+
             if (selected != prevSelected) {
                 if (isHoverReady) ma_sound_seek_to_pcm_frame(&hoverSfx, 0);
                 if (isHoverReady) ma_sound_start(&hoverSfx);
@@ -309,25 +328,354 @@ int MainMenu::show() {
         if (key == 13) {
             cursorInfo.bVisible = true;
             SetConsoleCursorInfo(hConsole, &cursorInfo);
-            
-            int action = selected;
-            if (!hasSave) action += 1; 
 
-            Logger::getInstance().info("Menu selection: Action ID " + std::to_string(action));
+            MenuResult::Action action = items[selected].action;
+            Logger::getInstance().info("Menu selection: action " + std::to_string(action));
 
-            switch (action) {
-                case 0: if (isMusicReady) ma_sound_stop(&menuMusic); return 2;
-                case 1: if (isMusicReady) ma_sound_stop(&menuMusic); return 1; 
-                case 2: showSettings(); break;
-                case 3: showAbout(); break;
-                case 4: return 0;
+            if (action == MenuResult::LoadSlot || action == MenuResult::SaveSlot) {
+                bool saveMode = (action == MenuResult::SaveSlot);
+                SaveSlotSelection sel = showSaveLoadScreen(saveMode);
+                if (sel.valid) {
+                    if (isMusicReady) ma_sound_stop(&menuMusic);
+                    if (saveMode) {
+                        MenuResult result;
+                        result.action = MenuResult::SaveSlot;
+                        result.slot = sel.slot;
+                        result.isAutosave = sel.isAutosave;
+                        return result;
+                    } else {
+                        MenuResult result;
+                        result.action = MenuResult::LoadSlot;
+                        result.slot = sel.slot;
+                        result.isAutosave = sel.isAutosave;
+                        return result;
+                    }
+                }
+            } else if (action == MenuResult::Continue) {
+                if (isMusicReady) ma_sound_stop(&menuMusic);
+                return MenuResult{MenuResult::Continue, 0, false};
+            } else if (action == MenuResult::NewGame) {
+                if (isMusicReady) ma_sound_stop(&menuMusic);
+                return MenuResult{MenuResult::NewGame, 0, false};
+            } else if (action == MenuResult::Exit) {
+                return MenuResult{MenuResult::Exit, 0, false};
+            } else if (action == MenuResult::Settings) {
+                showSettings();
+            } else if (action == MenuResult::About) {
+                showAbout();
             }
-            
+
             cursorInfo.bVisible = false;
             SetConsoleCursorInfo(hConsole, &cursorInfo);
         }
 
-        if (key == 27) return 0;
+        if (key == 27) return MenuResult{MenuResult::Exit, 0, false};
+    }
+}
+
+SaveSlotSelection MainMenu::showSaveLoadScreen(bool saveMode) {
+    SaveSlotSelection result;
+    auto& lm = LocalizationManager::getInstance();
+
+    auto manualSaves = SaveManager::listManualSaves();
+    auto autosaves = SaveManager::listAutosaves();
+
+    struct SlotItem {
+        bool isAutosave;
+        int slot;
+        bool exists;
+        SaveManager::SaveInfo info;
+    };
+
+    std::vector<SlotItem> slots;
+
+    if (saveMode) {
+        // Show fixed range of manual slots plus a "new slot" entry.
+        int maxShownSlot = 5;
+        for (const auto& s : manualSaves) {
+            maxShownSlot = std::max(maxShownSlot, s.slot);
+        }
+        for (int i = 1; i <= maxShownSlot + 1; ++i) {
+            SlotItem item{};
+            item.isAutosave = false;
+            item.slot = i;
+            auto it = std::find_if(manualSaves.begin(), manualSaves.end(),
+                [i](const SaveManager::SaveInfo& s) { return s.slot == i; });
+            item.exists = it != manualSaves.end();
+            if (item.exists) item.info = *it;
+            slots.push_back(item);
+        }
+    } else {
+        // Load mode: show existing autosaves and manual saves.
+        for (const auto& s : autosaves) {
+            SlotItem item{};
+            item.isAutosave = true;
+            item.slot = s.slot;
+            item.exists = true;
+            item.info = s;
+            slots.push_back(item);
+        }
+        for (const auto& s : manualSaves) {
+            SlotItem item{};
+            item.isAutosave = false;
+            item.slot = s.slot;
+            item.exists = true;
+            item.info = s;
+            slots.push_back(item);
+        }
+    }
+
+    if (slots.empty()) {
+        clearScreen();
+        std::cout << "\n\n     " << lm.get("save_empty") << "\n";
+        std::cout << "\n     " << lm.get("btn_back") << "...";
+        _getch();
+        return result;
+    }
+
+    int selected = 0;
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+
+    const int innerWidth = 70;
+
+    auto clampChapterName = [](const std::string& name) -> std::string {
+        if (name.length() <= 22) return name;
+        return name.substr(0, 19) + "...";
+    };
+
+    while (true) {
+        clearScreen();
+
+        std::string titleKey = saveMode ? "save_title_save" : "save_title_load";
+        std::string titleText = lm.get(titleKey);
+        int titleLen = getVisibleLength(titleText);
+        int padLeft = (innerWidth - titleLen) / 2;
+        int padRight = innerWidth - titleLen - padLeft;
+
+        std::cout << "\n\n     \x1B[1;36m+" << std::string(innerWidth, '=') << "+\x1B[0m\n";
+        std::cout << "     \x1B[1;36m|\x1B[0m" << std::string(padLeft, ' ') << titleText << std::string(padRight, ' ') << "\x1B[1;36m|\x1B[0m\n";
+        std::cout << "     \x1B[1;36m+" << std::string(innerWidth, '=') << "+\x1B[0m\n";
+
+        for (size_t i = 0; i < slots.size(); ++i) {
+            const auto& slot = slots[i];
+            std::string line;
+            if (slot.exists) {
+                std::string typeLabel = slot.isAutosave ? lm.get("save_slot_autosave") : lm.get("save_slot_manual");
+                std::string chapter = slot.info.chapterName.empty() ? "-" : clampChapterName(slot.info.chapterName);
+                std::string ts = slot.info.timestamp;
+                if (ts.length() > 16) ts = ts.substr(0, 16);
+                line = "[#" + std::to_string(slot.slot) + "] " + typeLabel
+                     + " | " + ts
+                     + " | " + chapter
+                     + " | " + std::to_string(slot.info.progressPercent) + "%";
+            } else {
+                line = "[#" + std::to_string(slot.slot) + "] " + lm.get("save_slot_empty");
+            }
+
+            std::string prefix = (i == static_cast<size_t>(selected)) ? " > " : "   ";
+            std::string fullLine = prefix + line;
+            int visibleLen = getVisibleLength(fullLine);
+            int spacesToAdd = innerWidth - visibleLen - 2;
+            if (spacesToAdd < 0) spacesToAdd = 0;
+
+            std::cout << "     \x1B[1;36m|\x1B[0m  ";
+            if (i == static_cast<size_t>(selected)) {
+                std::cout << "\x1B[1;33m" << fullLine << "\x1B[0m";
+            } else {
+                std::cout << fullLine;
+            }
+            std::cout << std::string(spacesToAdd, ' ') << "\x1B[1;36m|\x1B[0m\n";
+        }
+
+        std::cout << "     \x1B[1;36m+" << std::string(innerWidth, '=') << "+\x1B[0m\n";
+        std::cout << "\n     [ " << (saveMode ? lm.get("save_hint_save") : lm.get("save_hint_load")) << " ]\n";
+
+        int key = _getch();
+
+        if (key == 0xE0 || key == 0) {
+            int prevSelected = selected;
+            key = _getch();
+            if (key == 72) selected = (selected - 1 + static_cast<int>(slots.size())) % static_cast<int>(slots.size());
+            if (key == 80) selected = (selected + 1) % static_cast<int>(slots.size());
+
+            if (selected != prevSelected) {
+                if (isHoverReady) ma_sound_seek_to_pcm_frame(&hoverSfx, 0);
+                if (isHoverReady) ma_sound_start(&hoverSfx);
+            }
+            continue;
+        }
+
+        if (key == 13) {
+            const auto& slot = slots[selected];
+            if (!saveMode && !slot.exists) continue;
+            result.valid = true;
+            result.slot = slot.slot;
+            result.isAutosave = slot.isAutosave;
+            cursorInfo.bVisible = true;
+            SetConsoleCursorInfo(hConsole, &cursorInfo);
+            clearScreen();
+            return result;
+        }
+
+        if (key == 83 || key == 115) { // Del / s (lower/upper) - use Delete scan code
+            // In load mode allow deleting existing saves.
+            if (!saveMode) {
+                const auto& slot = slots[selected];
+                if (slot.exists) {
+                    SaveManager::deleteSave(slot.slot, slot.isAutosave);
+                    // Rebuild list
+                    manualSaves = SaveManager::listManualSaves();
+                    autosaves = SaveManager::listAutosaves();
+                    slots.clear();
+                    for (const auto& s : autosaves) {
+                        slots.push_back({true, s.slot, true, s});
+                    }
+                    for (const auto& s : manualSaves) {
+                        slots.push_back({false, s.slot, true, s});
+                    }
+                    if (slots.empty()) {
+                        cursorInfo.bVisible = true;
+                        SetConsoleCursorInfo(hConsole, &cursorInfo);
+                        return result;
+                    }
+                    if (selected >= static_cast<int>(slots.size())) selected = static_cast<int>(slots.size()) - 1;
+                }
+            }
+        }
+
+        if (key == 27) {
+            cursorInfo.bVisible = true;
+            SetConsoleCursorInfo(hConsole, &cursorInfo);
+            return result;
+        }
+    }
+}
+
+PauseResult MainMenu::showPauseScreen() {
+    PauseResult result;
+    auto& lm = LocalizationManager::getInstance();
+
+    struct PauseItem {
+        std::string text;
+        PauseResult::Action action;
+    };
+
+    std::vector<PauseItem> items = {
+        {lm.get("pause_resume"), PauseResult::Resume},
+        {lm.get("pause_load"), PauseResult::Load},
+        {lm.get("pause_save"), PauseResult::Save},
+        {lm.get("pause_settings"), PauseResult::Settings},
+        {lm.get("pause_main_menu"), PauseResult::MainMenu}
+    };
+
+    int selected = 0;
+    const int itemCount = static_cast<int>(items.size());
+    const int innerWidth = 36;
+
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+
+    while (true) {
+        clearScreen();
+
+        std::string titleText = lm.get("pause_title");
+        int titleLen = getVisibleLength(titleText);
+        int padLeft = (innerWidth - titleLen) / 2;
+        int padRight = innerWidth - titleLen - padLeft;
+
+        std::cout << "\n\n     \x1B[1;36m+" << std::string(innerWidth, '=') << "+\x1B[0m\n";
+        std::cout << "     \x1B[1;36m|\x1B[0m" << std::string(padLeft, ' ') << titleText << std::string(padRight, ' ') << "\x1B[1;36m|\x1B[0m\n";
+        std::cout << "     \x1B[1;36m+" << std::string(innerWidth, '=') << "+\x1B[0m\n";
+        std::cout << "     \x1B[1;36m|\x1B[0m" << std::string(innerWidth, ' ') << "\x1B[1;36m|\x1B[0m\n";
+
+        for (int i = 0; i < itemCount; i++) {
+            std::string prefix = (i == selected) ? " > " : "   ";
+            std::string fullLine = prefix + items[i].text;
+            int visibleLen = getVisibleLength(fullLine);
+            int spacesToAdd = innerWidth - visibleLen - 2;
+            if (spacesToAdd < 0) spacesToAdd = 0;
+
+            std::cout << "     \x1B[1;36m|\x1B[0m  ";
+            if (i == selected) {
+                std::cout << "\x1B[1;33m" << fullLine << "\x1B[0m";
+            } else {
+                std::cout << fullLine;
+            }
+            std::cout << std::string(spacesToAdd, ' ') << "\x1B[1;36m|\x1B[0m\n";
+        }
+
+        std::cout << "     \x1B[1;36m|\x1B[0m" << std::string(innerWidth, ' ') << "\x1B[1;36m|\x1B[0m\n";
+        std::cout << "     \x1B[1;36m+" << std::string(innerWidth, '=') << "+\x1B[0m\n";
+        std::cout << "\n     [ " << lm.get("pause_hint") << " ]\n";
+
+        int key = _getch();
+
+        if (key == 0xE0 || key == 0) {
+            int prevSelected = selected;
+            key = _getch();
+            if (key == 72) selected = (selected - 1 + itemCount) % itemCount;
+            if (key == 80) selected = (selected + 1) % itemCount;
+
+            if (selected != prevSelected) {
+                if (isHoverReady) ma_sound_seek_to_pcm_frame(&hoverSfx, 0);
+                if (isHoverReady) ma_sound_start(&hoverSfx);
+            }
+            continue;
+        }
+
+        if (key == 13) {
+            PauseResult::Action action = items[selected].action;
+
+            if (action == PauseResult::Load) {
+                SaveSlotSelection sel = showSaveLoadScreen(false);
+                if (sel.valid) {
+                    result.action = PauseResult::Load;
+                    result.slot = sel.slot;
+                    result.isAutosave = sel.isAutosave;
+                    cursorInfo.bVisible = true;
+                    SetConsoleCursorInfo(hConsole, &cursorInfo);
+                    return result;
+                }
+                continue;
+            }
+
+            if (action == PauseResult::Save) {
+                SaveSlotSelection sel = showSaveLoadScreen(true);
+                if (sel.valid) {
+                    result.action = PauseResult::Save;
+                    result.slot = sel.slot;
+                    result.isAutosave = false;
+                    cursorInfo.bVisible = true;
+                    SetConsoleCursorInfo(hConsole, &cursorInfo);
+                    return result;
+                }
+                continue;
+            }
+
+            if (action == PauseResult::Settings) {
+                showSettings();
+                continue;
+            }
+
+            result.action = action;
+            cursorInfo.bVisible = true;
+            SetConsoleCursorInfo(hConsole, &cursorInfo);
+            return result;
+        }
+
+        if (key == 27) {
+            result.action = PauseResult::Resume;
+            cursorInfo.bVisible = true;
+            SetConsoleCursorInfo(hConsole, &cursorInfo);
+            return result;
+        }
     }
 }
 

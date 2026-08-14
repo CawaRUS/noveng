@@ -1,0 +1,5 @@
+{banner:Продолжение}
+
+Система: Демонстрация {switch}.
+{set:mood|neutral|string}
+{switch:$mood$|happy|demo_good.txt|neutral|demo_neutral.txt|sad|demo_bad.txt}

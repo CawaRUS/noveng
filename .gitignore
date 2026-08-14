@@ -1,6 +1,7 @@
 
 # Build artifacts
 build/
+tests/
 dist/
 game.exe
 novpack.exe
@@ -32,3 +33,5 @@ res/scenario/scenario_old.txt
 res/log/*.log
 dist/*.exe
 dist/res
+PLANS.md
+AUDIT.md

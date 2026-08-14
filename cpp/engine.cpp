@@ -5,10 +5,14 @@
 #include "localisation.hpp"
 #include "command.hpp"
 #include "crypto_wrapper.hpp"
+#include "save_manager.hpp"
+#include "menu.hpp"
+#include "scenario_validator.hpp"
 #include <iostream>
 #include <fstream>
 #include <thread>
 #include <chrono>
+#include <utility>
 
 std::map<std::string, std::vector<char>> NovelEngine::fileCache;
 #include <conio.h>
@@ -26,18 +30,54 @@ int safeStoi(const std::string& str, int defaultVal = 0) {
     try { return std::stoi(str); } catch (...) { return defaultVal; }
 }
 
+std::string resolveScenarioPath(const std::string& filename) {
+    if (filename.empty()) return "";
+    // Reject any path containing parent directory references outright.
+    if (filename.find("..") != std::string::npos) {
+        Logger::getInstance().error("Scenario name contains '..' traversal: " + filename);
+        return "";
+    }
+
+    fs::path scenarioDir = fs::path(DIR_RES) / DIR_SCENARIO;
+    fs::path target = scenarioDir / filename;
+
+    try {
+        fs::path canonicalTarget = fs::weakly_canonical(target);
+        fs::path canonicalBase = fs::weakly_canonical(scenarioDir);
+
+        auto [baseEnd, targetEnd] = std::mismatch(canonicalBase.begin(), canonicalBase.end(),
+                                                  canonicalTarget.begin(), canonicalTarget.end());
+        if (baseEnd != canonicalBase.end()) {
+            Logger::getInstance().error("Scenario path escapes scenario directory: " + filename);
+            return "";
+        }
+    } catch (const fs::filesystem_error& e) {
+        Logger::getInstance().error("Invalid scenario path: " + filename);
+        return "";
+    }
+
+    if (target.extension() != ".txt") {
+        Logger::getInstance().error("Scenario file must have .txt extension: " + filename);
+        return "";
+    }
+
+    return target.string();
+}
+
 void NovelEngine::render() {
     std::cout << "\033[2J\033[H"; 
     
     for(int y = 0; y < offsetY; ++y) std::cout << "\n";
 
     for (const auto& entry : history) {
-        std::cout << "\n" << entry.color << ">>> " << entry.speaker << " <<<" << CLR_RESET << std::endl;
-        
+        if (!entry.speaker.empty()) {
+            std::cout << "\n" << entry.color << ">>> " << entry.speaker << " <<<" << CLR_RESET << std::endl;
+        }
+
         if (&entry == &history.back()) {
             for(int x = 0; x < offsetX; ++x) std::cout << " ";
         }
-        
+
         std::cout << CLR_TEXT << entry.text << CLR_RESET << std::endl;
     }
     std::cout << std::flush;
@@ -50,6 +90,14 @@ NovelEngine::NovelEngine() {
         Logger::getInstance().error("CRITICAL: Failed to initialize audio engine!");
         std::cerr << LocalizationManager::getInstance().get("audio_error") << std::endl;
     }
+
+    if (loadPersistent()) {
+        Logger::getInstance().info("Persistent variables loaded successfully.");
+    }
+}
+
+void NovelEngine::setMenu(MainMenu* m) {
+    menu = m;
 }
 
 NovelEngine::~NovelEngine() {
@@ -95,7 +143,7 @@ void NovelEngine::executeCommand(const std::string& cmd) {
     }
 }
 
-void NovelEngine::saveGame(int slot) {
+bool NovelEngine::saveGame(int slot) {
     Logger::getInstance().info("Saving game to slot " + std::to_string(slot) + "...");
     fs::path saveDir = fs::path(DIR_RES) / DIR_SAVE;
     if (!fs::exists(saveDir)) fs::create_directories(saveDir);
@@ -107,41 +155,83 @@ void NovelEngine::saveGame(int slot) {
     state.characterPitches = this->characterPitches;
     state.eventIndex = currentEventIdx;
     state.variables = this->variables;
+    state.currentSpeaker = this->currentSpeaker;
+    state.saveTimestamp = SaveManager::getCurrentTimestamp();
+    state.totalEvents = events.size();
 
-    fs::path savePath = saveDir / ("save" + std::to_string(slot) + ".json");
-    std::ofstream file(savePath);
-    if (file.is_open()) {
+    fs::path savePath = SaveManager::getSavePath(slot, false);
+    try {
         json j = state;
-        file << j.dump(4);
-        
+        std::string plainText = j.dump(4);
+        std::vector<uint8_t> buffer(plainText.begin(), plainText.end());
+
+        std::string saveKey = CryptoWrapper::deriveSaveKey(ASSET_KEY);
+        if (!CryptoWrapper::encryptBuffer(buffer, saveKey)) {
+            Logger::getInstance().error("Failed to encrypt save slot " + std::to_string(slot));
+            return false;
+        }
+
+        std::ofstream file(savePath, std::ios::binary);
+        if (!file.is_open()) {
+            Logger::getInstance().error("Failed to open save file for writing: " + savePath.string());
+            return false;
+        }
+        file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+
         std::string speaker = LocalizationManager::getInstance().get("system_name");
         std::string msg = LocalizationManager::getInstance().get("system_save_message") + " [" + std::to_string(slot) + "]";
         history.push_back({speaker, msg, CLR_SYSTEM});
-        
+
         size_t maxHistory = SettingsManager::getInstance().get().historySize;
         if (history.size() > maxHistory) {
             history.erase(history.begin());
         }
         render();
+        return true;
+    } catch (const std::exception& e) {
+        Logger::getInstance().error("Exception while saving game: " + std::string(e.what()));
+        return false;
     }
 }
 
-bool NovelEngine::loadGame(int slot) {
-    fs::path savePath = fs::path(DIR_RES) / DIR_SAVE / ("save" + std::to_string(slot) + ".json");
+bool NovelEngine::loadGame(int slot, bool isAutosave) {
+    fs::path savePath = SaveManager::getSavePath(slot, isAutosave);
     if (!fs::exists(savePath)) return false;
 
     try {
-        std::ifstream file(savePath);
-        json j; file >> j;
+        std::ifstream file(savePath, std::ios::binary);
+        if (!file.is_open()) return false;
+
+        std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        std::string plainText;
+        std::string saveKey = CryptoWrapper::deriveSaveKey(ASSET_KEY);
+
+        if (CryptoFormat::hasMagic(buffer) && CryptoWrapper::decryptBuffer(buffer, saveKey)) {
+            plainText.assign(buffer.begin(), buffer.end());
+            Logger::getInstance().info("Save slot " + std::to_string(slot) + " decrypted successfully.");
+        } else {
+            // Fallback for unencrypted (legacy) save files.
+            plainText.assign(buffer.begin(), buffer.end());
+            Logger::getInstance().warn("Save slot " + std::to_string(slot) + " appears unencrypted or uses a different key. Loading as plaintext.");
+        }
+
+        json j = json::parse(plainText);
         GameState state = j.get<GameState>();
 
         this->currentChapterFile = state.currentScene;
         this->characterColors = state.characterColors;
         this->characterPitches = state.characterPitches;
         this->variables = state.variables;
+        this->currentSpeaker = state.currentSpeaker;
 
         this->currentEventIdx = state.eventIndex;
         Logger::getInstance().info("Loaded eventIndex: " + std::to_string(state.eventIndex));
+
+        this->history.clear();
+        this->lastSpeaker.clear();
+        this->lastFullText.clear();
 
         stopAudio();
 
@@ -149,14 +239,139 @@ bool NovelEngine::loadGame(int slot) {
             this->currentMusicFile = state.currentMusic;
         }
 
+        mergePersistentIntoVariables();
         this->chapterFinished = false;
         return true;
     } catch (...) { return false; }
 }
 
+void NovelEngine::autosave() {
+    int slot = SaveManager::pickAutosaveSlot();
+    Logger::getInstance().info("Autosaving to slot " + std::to_string(slot) + "...");
+
+    fs::path savePath = SaveManager::getSavePath(slot, true);
+    fs::path saveDir = savePath.parent_path();
+    if (!fs::exists(saveDir)) fs::create_directories(saveDir);
+
+    try {
+        GameState state;
+        state.currentScene = currentChapterFile;
+        state.currentMusic = this->currentMusicFile;
+        state.characterColors = this->characterColors;
+        state.characterPitches = this->characterPitches;
+        state.eventIndex = currentEventIdx;
+        state.variables = this->variables;
+        state.currentSpeaker = this->currentSpeaker;
+        state.saveTimestamp = SaveManager::getCurrentTimestamp();
+        state.totalEvents = events.size();
+
+        json j = state;
+        std::string plainText = j.dump(4);
+        std::vector<uint8_t> buffer(plainText.begin(), plainText.end());
+
+        std::string saveKey = CryptoWrapper::deriveSaveKey(ASSET_KEY);
+        if (!CryptoWrapper::encryptBuffer(buffer, saveKey)) {
+            Logger::getInstance().error("Failed to encrypt autosave slot " + std::to_string(slot));
+            return;
+        }
+
+        std::ofstream file(savePath, std::ios::binary);
+        if (file.is_open()) {
+            file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+            dialogCountSinceAutosave = 0;
+            Logger::getInstance().info("Autosave complete: " + savePath.string());
+        } else {
+            Logger::getInstance().error("Failed to open autosave file for writing: " + savePath.string());
+        }
+    } catch (const std::exception& e) {
+        Logger::getInstance().error("Exception while autosaving: " + std::string(e.what()));
+    }
+}
+
+void NovelEngine::mergePersistentIntoVariables() {
+    for (const auto& [key, value] : persistentVariables) {
+        if (!variables.count(key)) {
+            variables[key] = value;
+        }
+    }
+}
+
+bool NovelEngine::loadPersistent() {
+    fs::path persistentPath = fs::path(DIR_RES) / DIR_SAVE / "persistent.json";
+    if (!fs::exists(persistentPath)) {
+        Logger::getInstance().info("No persistent save file found. Starting with empty persistent variables.");
+        return true;
+    }
+
+    try {
+        std::ifstream file(persistentPath, std::ios::binary);
+        if (!file.is_open()) return false;
+
+        std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        std::string plainText;
+        std::string saveKey = CryptoWrapper::deriveSaveKey(ASSET_KEY);
+
+        if (CryptoFormat::hasMagic(buffer) && CryptoWrapper::decryptBuffer(buffer, saveKey)) {
+            plainText.assign(buffer.begin(), buffer.end());
+            Logger::getInstance().info("Persistent file decrypted successfully.");
+        } else {
+            plainText.assign(buffer.begin(), buffer.end());
+            Logger::getInstance().warn("Persistent file appears unencrypted or uses a different key. Loading as plaintext.");
+        }
+
+        json j = json::parse(plainText);
+        PersistentState state = j.get<PersistentState>();
+        persistentVariables = state.variables;
+        mergePersistentIntoVariables();
+        return true;
+    } catch (const std::exception& e) {
+        Logger::getInstance().error("Exception while loading persistent variables: " + std::string(e.what()));
+        return false;
+    }
+}
+
+bool NovelEngine::savePersistent() {
+    fs::path saveDir = fs::path(DIR_RES) / DIR_SAVE;
+    if (!fs::exists(saveDir)) fs::create_directories(saveDir);
+
+    try {
+        PersistentState state;
+        state.variables = persistentVariables;
+
+        json j = state;
+        std::string plainText = j.dump(4);
+        std::vector<uint8_t> buffer(plainText.begin(), plainText.end());
+
+        std::string saveKey = CryptoWrapper::deriveSaveKey(ASSET_KEY);
+        if (!CryptoWrapper::encryptBuffer(buffer, saveKey)) {
+            Logger::getInstance().error("Failed to encrypt persistent file.");
+            return false;
+        }
+
+        fs::path persistentPath = saveDir / "persistent.json";
+        std::ofstream file(persistentPath, std::ios::binary);
+        if (!file.is_open()) {
+            Logger::getInstance().error("Failed to open persistent file for writing: " + persistentPath.string());
+            return false;
+        }
+        file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+        Logger::getInstance().info("Persistent variables saved.");
+        return true;
+    } catch (const std::exception& e) {
+        Logger::getInstance().error("Exception while saving persistent variables: " + std::string(e.what()));
+        return false;
+    }
+}
+
 void NovelEngine::applySettings() {
     auto& cfg = SettingsManager::getInstance().get();
-    ma_engine_set_volume(&audio, cfg.musicVolume);
+    if (musicMuted) {
+        ma_engine_set_volume(&audio, 0.0f);
+    } else {
+        ma_engine_set_volume(&audio, cfg.musicVolume);
+    }
 }
 
 void NovelEngine::stopAudio() {
@@ -167,6 +382,11 @@ void NovelEngine::stopAudio() {
         }
     }
     activeSounds.clear();
+
+    if (musicSound && musicSound->initialized) {
+        ma_sound_stop(&musicSound->sound);
+    }
+    musicSound.reset();
 }
 
 void NovelEngine::cleanupSounds() {
@@ -184,15 +404,6 @@ void NovelEngine::cleanupSounds() {
 }
 
 void NovelEngine::playSFX(const std::string& filename, float pitch) {
-    {
-        std::lock_guard<std::mutex> lock(soundsMutex);
-        if (activeSounds.size() > 20) {
-            soundsMutex.unlock();
-            cleanupSounds();
-            soundsMutex.lock();
-        }
-    }
-
     std::filesystem::path path = std::filesystem::path(DIR_RES) / DIR_SFX / filename;
     auto data = readFile(path.string());
     if (data.empty()) {
@@ -216,7 +427,12 @@ void NovelEngine::playSFX(const std::string& filename, float pitch) {
         ma_sound_set_pitch(&pActiveSound->sound, pitch);
         ma_sound_start(&pActiveSound->sound);
 
-        std::lock_guard<std::mutex> lock(soundsMutex);
+        std::unique_lock<std::mutex> lock(soundsMutex);
+        if (activeSounds.size() > 20) {
+            lock.unlock();
+            cleanupSounds();
+            lock.lock();
+        }
         activeSounds.push_back(std::move(pActiveSound));
     } else {
         Logger::getInstance().error("Failed to init sound source: " + filename);
@@ -224,7 +440,7 @@ void NovelEngine::playSFX(const std::string& filename, float pitch) {
     }
 }
 
-void NovelEngine::typeText(const std::string& text, int speedMs) {
+bool NovelEngine::typeText(const std::string& text, int speedMs) {
     int finalSpeed = SettingsManager::getInstance().get().typingSpeed;
     float currentPitch = characterPitches.count(currentSpeaker) ? characterPitches[currentSpeaker] : 1.0f;
 
@@ -238,7 +454,7 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
         if (lead >= 0xF0) charLen = 4;
         else if (lead >= 0xE0) charLen = 3;
         else if (lead >= 0xC0) charLen = 2;
-        
+
         if (i + charLen > text.length()) {
             charLen = text.length() - i;
         }
@@ -251,21 +467,21 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
                 if (ch == 32) { // Пробел - снять паузу
                     paused = false;
                     break;
-                } else if (ch == 27) { // ESC - выход в меню
+                } else if (ch == 27) { // ESC - меню паузы
                     if (i < text.length()) std::cout << text.substr(i);
                     std::cout << std::endl;
-                    throw std::runtime_error("ESC_TO_MENU");
+                    return false;
                 } else if (ch == 13) { // Enter - пропустить
                     if (i < text.length()) std::cout << text.substr(i);
                     std::cout << std::endl;
-                    return;
+                    return true;
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
         std::cout << character << std::flush;
-        
+
         bool isCharSpace = false;
         if (charLen == 1 && std::isspace(static_cast<unsigned char>(character[0]))) {
             isCharSpace = true;
@@ -282,10 +498,10 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
             if (ch == 13) { // Enter - пропустить анимацию
                 if (i + charLen < text.length()) std::cout << text.substr(i + charLen);
                 break;
-            } else if (ch == 27) { // ESC - выход в меню
+            } else if (ch == 27) { // ESC - меню паузы
                 if (i + charLen < text.length()) std::cout << text.substr(i + charLen);
                 std::cout << std::endl;
-                throw std::runtime_error("ESC_TO_MENU");
+                return false;
             } else if (ch == 32) { // Пробел - пауза
                 paused = true;
             }
@@ -295,6 +511,7 @@ void NovelEngine::typeText(const std::string& text, int speedMs) {
         i += charLen;
     }
     std::cout << std::endl;
+    return true;
 }
 
 std::vector<char> NovelEngine::readFile(const std::string& path) {
@@ -310,7 +527,7 @@ std::vector<char> NovelEngine::readFile(const std::string& path) {
     file.close();
     if (USE_DECRYPT) {
         std::string key = ASSET_KEY;
-        if (!key.empty()) {
+        if (!key.empty() && CryptoFormat::hasMagic(buffer)) {
             std::vector<uint8_t> data(buffer.begin(), buffer.end());
             if (CryptoWrapper::decryptBuffer(data, key)) {
                 buffer.assign(data.begin(), data.end());
@@ -332,7 +549,12 @@ std::string NovelEngine::replaceMacros(std::string text) {
         size_t endPos = text.find('$', startPos + 1);
         if (endPos == std::string::npos) break;
         std::string varName = text.substr(startPos + 1, endPos - startPos - 1);
-        std::string replacement = variables.count(varName) ? std::to_string(variables[varName]) : "0";
+        if (!isValidIdentifier(varName)) {
+            Logger::getInstance().warn("Invalid variable name in macro: " + varName);
+            startPos = endPos + 1;
+            continue;
+        }
+        std::string replacement = variables.count(varName) ? variantToString(variables[varName]) : "0";
         text.replace(startPos, (endPos - startPos) + 1, replacement);
         startPos += replacement.length();
     }
@@ -340,12 +562,19 @@ std::string NovelEngine::replaceMacros(std::string text) {
 }
 
 bool NovelEngine::loadScenario(const std::string& filename) {
+    if (filename.empty()) return false;
+
     fs::path requestedPath = fs::path(filename);
     fs::path basePath = fs::path(DIR_RES);
 
+    if (requestedPath.extension() != ".txt") {
+        Logger::getInstance().error("Scenario file must have .txt extension: " + filename);
+        return false;
+    }
+
     try {
         fs::path canonicalRequested = fs::weakly_canonical(requestedPath);
-        fs::path canonicalBase = fs::weakly_canonical(basePath);
+        fs::path canonicalBase = fs::weakly_canonical(basePath / DIR_SCENARIO);
 
         auto [rootEnd, nothing] = std::mismatch(canonicalBase.begin(), canonicalBase.end(),
                                                  canonicalRequested.begin(), canonicalRequested.end());
@@ -359,7 +588,20 @@ bool NovelEngine::loadScenario(const std::string& filename) {
     }
 
     auto data = readFile(filename);
-    if (data.empty()) return false;
+    if (data.empty()) {
+        // Distinguish between a missing file and an existing empty scenario file.
+        try {
+            if (fs::exists(filename) && fs::is_regular_file(filename) && fs::file_size(filename) == 0) {
+                events.clear();
+                currentChapterFile = filename;
+                return true;
+            }
+        } catch (const fs::filesystem_error&) {
+            // Fall through to the generic failure below.
+        }
+        Logger::getInstance().error("Scenario file not found or could not be read: " + filename);
+        return false;
+    }
 
     events.clear();
     currentChapterFile = filename;
@@ -380,6 +622,14 @@ bool NovelEngine::loadScenario(const std::string& filename) {
             events.push_back({EventType::TEXT, currentName, line});
         }
     }
+
+    auto validation = ScenarioValidator::validate(events, commandRegistry);
+    if (!validation.valid) {
+        Logger::getInstance().error("Scenario validation failed for: " + filename);
+        events.clear();
+        return false;
+    }
+
     return true;
 }
 
@@ -401,7 +651,58 @@ void NovelEngine::run() {
             }
         }
     }
-    chapterFinished = false; 
+    chapterFinished = false;
+
+    auto handlePause = [this]() -> std::pair<bool, bool> {
+        if (!menu) return {true, false};
+        PauseResult result = menu->showPauseScreen();
+        if (result.action == PauseResult::MainMenu) {
+            Logger::getInstance().info("User selected return to main menu from pause");
+            return {true, false};
+        }
+        if (result.action == PauseResult::Load) {
+            if (loadGame(result.slot, result.isAutosave)) {
+                loadScenario(currentChapterFile);
+                applySettings();
+                Logger::getInstance().info("Pause load: game loaded from slot " + std::to_string(result.slot));
+                return {false, true};
+            }
+            Logger::getInstance().warn("Pause load failed for slot " + std::to_string(result.slot));
+            return {false, false};
+        }
+        if (result.action == PauseResult::Save) {
+            saveGame(result.slot);
+        } else if (result.action == PauseResult::Settings) {
+            applySettings();
+        }
+        render();
+        return {false, false};
+    };
+
+    auto quickLoad = [this]() -> bool {
+        SaveManager::SaveInfo latest = SaveManager::getLatestSave();
+        if (latest.exists && loadGame(latest.slot, latest.isAutosave)) {
+            loadScenario(currentChapterFile);
+            applySettings();
+            render();
+            Logger::getInstance().info("Quick load from latest save");
+            return true;
+        }
+        Logger::getInstance().warn("Quick load failed: no valid save found");
+        return false;
+    };
+
+    auto toggleMute = [this]() {
+        auto& cfg = SettingsManager::getInstance().get();
+        if (musicMuted) {
+            musicMuted = false;
+            cfg.musicVolume = preMuteVolume;
+        } else {
+            musicMuted = true;
+            preMuteVolume = cfg.musicVolume;
+        }
+        applySettings();
+    };
 
     for (; currentEventIdx < events.size(); ++currentEventIdx) {
         cleanupSounds();
@@ -423,30 +724,47 @@ void NovelEngine::run() {
             this->lastFullText = processedText;
             std::cout << "\n" << currentColor << ">>> " << ev.name << " <<<" << CLR_RESET << std::endl;
             std::cout << CLR_TEXT;
-            try {
-                typeText(processedText, 30);
-            } catch (const std::runtime_error& e) {
-                if (std::string(e.what()) == "ESC_TO_MENU") {
-                    std::cout << CLR_RESET;
-                    Logger::getInstance().info("User pressed ESC, returning to menu");
-                    return;
-                }
-                throw;
-            }
+            bool finishedTyping = typeText(processedText, 30);
             std::cout << CLR_RESET;
 
+            if (!finishedTyping) {
+                auto [exitRun, replay] = handlePause();
+                if (exitRun) return;
+                if (replay) { --currentEventIdx; continue; }
+                render();
+                goto wait_input;
+            }
+
+        wait_input:
             while (true) {
                 cleanupSounds();
                 if (_kbhit()) {
                     int ch = _getch();
                     if (ch == 27) {
-                        Logger::getInstance().info("User pressed ESC, returning to menu");
-                        return;
+                        auto [exitRun, replay] = handlePause();
+                        if (exitRun) return;
+                        if (replay) { --currentEventIdx; break; }
+                        render();
+                        continue;
                     }
-                    if (ch == 's' || ch == 'S') { saveGame(1); continue; }
+                    if (ch == 's' || ch == 'S') { saveGame(1); render(); continue; }
+                    if (ch == 'l' || ch == 'L') {
+                        if (quickLoad()) {
+                            --currentEventIdx;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (ch == 'h' || ch == 'H') { render(); continue; }
+                    if (ch == 'm' || ch == 'M') { toggleMute(); continue; }
                     if (ch == 13) break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+
+            dialogCountSinceAutosave++;
+            if (dialogCountSinceAutosave >= AUTOSAVE_INTERVAL) {
+                autosave();
             }
         }
     }

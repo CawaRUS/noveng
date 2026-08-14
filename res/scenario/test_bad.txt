@@ -1,7 +1,0 @@
-{clear}
-{color: Система | 31}
-{play: home.mp3 | loop}
-
-[Система]
-trust_level меньше 0 ( $trust_level$ )
-Путь test_bad активирован

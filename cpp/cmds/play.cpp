@@ -7,7 +7,11 @@ class CmdPlay : public ICommand {
 public:
     void execute(NovelEngine* eng, const std::vector<std::string>& args) override {
         if (args.empty()) return;
-        if (eng->currentMusicFile == args[0] && !eng->activeSounds.empty()) return;
+
+        // Keep currently playing music if the request is for the same file.
+        if (eng->currentMusicFile == args[0] && eng->musicSound && eng->musicSound->initialized) {
+            return;
+        }
 
         eng->stopAudio();
         eng->currentMusicFile = args[0];
@@ -36,7 +40,7 @@ public:
             
             ma_sound_set_looping(&pActiveSound->sound, looping ? MA_TRUE : MA_FALSE);
             ma_sound_start(&pActiveSound->sound);
-            eng->activeSounds.push_back(std::move(pActiveSound));
+            eng->musicSound = std::move(pActiveSound);
             Logger::getInstance().debug("BGM Started (Memory): " + args[0]);
         } else {
             Logger::getInstance().error("Failed to init sound from data source: " + args[0]);

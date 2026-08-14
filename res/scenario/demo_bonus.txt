@@ -1,0 +1,7 @@
+{banner:Бонус}
+{narrator:У тебя достаточно очков для бонусной сцены.}
+
+{inc:score|20}
+Система: Бонусные очки начислены. score = $score$.
+
+{jump:demo_continue.txt}

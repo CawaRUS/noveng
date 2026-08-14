@@ -1,0 +1,28 @@
+{banner:Демо NovEng 0.6}
+{narrator:Этот сценарий показывает новые команды ветки 0.6.x.}
+{wait:500}
+
+{type_speed:40}
+{set:score|0|int}
+{set:lives|3|int}
+
+Система: Базовые переменные инициализированы.
+Система: score = $score$, lives = $lives$.
+
+{inc:score|10}
+Система: {inc:score|10} - score теперь $score$.
+
+{math:score|score * 2 + 5}
+Система: {math:score|score * 2 + 5} - score теперь $score$.
+
+{dec:lives|1}
+Система: {dec:lives|1} - lives теперь $lives$.
+
+{clamp:score|0|50}
+Система: {clamp:score|0|50} - score ограничен, теперь $score$.
+
+Система: Сейчас будет автосохранение.
+{autosave}
+
+Система: Проверим условную логику.
+{if:score >= 25|demo_bonus.txt|demo_continue.txt}
